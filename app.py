@@ -415,4 +415,4 @@ elif menu == t["nav"][8]:
 elif menu == t["nav"][9]:
     st.title("💳 Subscription & Account Status")
     st.write(f"**Current Status:** {sub_status}")
-    st.write(f"**Registered Mobile:** `{st.session_state.user_mobile}`st
+    st.write(f"**Registered Mobile:** `{st.session_state.user_mobile}`")

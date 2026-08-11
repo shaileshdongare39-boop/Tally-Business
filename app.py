@@ -244,4 +244,63 @@ elif menu in [t["nav"][1], t["nav"][2]]:
 
 # MASTERS
 elif menu == t["nav"][3]:
-    st.title("⚙️ Masters Cr
+    st.title("⚙️ Masters Creation")
+    tab1, tab2 = st.tabs(["📦 Item Master", "👤 Party Master"])
+    conn = get_db()
+    c = conn.cursor()
+    
+    with tab1:
+        i_name = st.text_input("Item Name")
+        c1, c2, c3, c4 = st.columns(4)
+        s_price = c1.number_input("Selling Price", min_value=0.0)
+        p_price = c2.number_input("Purchase Price", min_value=0.0)
+        gst = c3.selectbox("GST Rate %", [0.0, 5.0, 12.0, 18.0, 28.0])
+        op_stock = c4.number_input("Opening Stock", min_value=0.0)
+        
+        if st.button("Save Item"):
+            if i_name:
+                try:
+                    c.execute("INSERT INTO inventory (item_name, sale_price, purchase_price, gst_rate, stock_qty) VALUES (?, ?, ?, ?, ?)",
+                              (i_name, s_price, p_price, gst, op_stock))
+                    conn.commit()
+                    st.success("Item Saved!")
+                except sqlite3.IntegrityError:
+                    st.error("Item already exists.")
+                    
+    with tab2:
+        p_name = st.text_input("Party Name")
+        p_gstin = st.text_input("GSTIN Number")
+        p_type = st.selectbox("Type", ["Customer", "Supplier"])
+        
+        if st.button("Save Party"):
+            if p_name:
+                try:
+                    c.execute("INSERT INTO parties (party_name, gstin, party_type) VALUES (?, ?, ?)", (p_name, p_gstin, p_type))
+                    conn.commit()
+                    st.success("Party Saved!")
+                except sqlite3.IntegrityError:
+                    st.error("Party already exists.")
+
+# REPORTS / P&L / BALANCE SHEET
+elif menu == t["nav"][4]:
+    st.title("📑 GST Reports")
+    conn = get_db()
+    df = pd.read_sql_query("SELECT * FROM vouchers", conn)
+    st.dataframe(df, use_container_width=True)
+
+elif menu == t["nav"][5]:
+    st.title("📊 Profit & Loss Account")
+    conn = get_db()
+    sales = pd.read_sql_query("SELECT SUM(taxable_amt) FROM vouchers WHERE voucher_type='Sales'", conn).iloc[0, 0] or 0.0
+    purchases = pd.read_sql_query("SELECT SUM(taxable_amt) FROM vouchers WHERE voucher_type='Purchase'", conn).iloc[0, 0] or 0.0
+    st.metric("Gross Profit", f"₹ {(sales - purchases):,.2f}")
+
+elif menu == t["nav"][6]:
+    st.title("⚖️ Balance Sheet")
+    conn = get_db()
+    stock_val = pd.read_sql_query("SELECT SUM(stock_qty * purchase_price) FROM inventory", conn).iloc[0, 0] or 0.0
+    st.metric("Closing Stock Value", f"₹ {stock_val:,.2f}")
+
+elif menu == t["nav"][7]:
+    st.title("💳 Subscription Status")
+    st.write(f"**Status:** {sub_status}")

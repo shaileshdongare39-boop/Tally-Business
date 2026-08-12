@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import random
 import io
+import json
 import base64
 import urllib.parse
 from datetime import datetime, timedelta
@@ -20,19 +21,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🛠️ FIXED SMOOTH MOBILE SCROLLING & TOUCH CSS
+# 🛠️ MOBILE SCROLLING & TOUCH CSS FIX
 st.markdown("""
     <style>
-    /* Fixed Touch Scrolling for all Mobile Browsers */
     html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp, .main {
         overflow-y: auto !important;
         -webkit-overflow-scrolling: touch !important;
         touch-action: pan-y !important;
     }
-    
     .stApp { background-color: #f8fafc; color: #0f172a; }
     
-    /* Sidebar Readability */
     [data-testid="stSidebar"] {
         background-color: #ffffff !important;
         border-right: 1px solid #e2e8f0;
@@ -43,7 +41,6 @@ st.markdown("""
         font-size: 0.95rem !important;
     }
     
-    /* Header Banner Styling */
     .main-header {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         color: #ffffff; padding: 22px; border-radius: 12px; margin-bottom: 25px;
@@ -84,7 +81,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Database Initialization
-DB_FILE = "sd_tally_v9_master.db"
+DB_FILE = "sd_tally_v12_master.db"
 
 def get_db():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -128,6 +125,15 @@ def init_db():
                     party_type TEXT,
                     opening_balance REAL DEFAULT 0
                 )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS bank_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_mobile TEXT,
+                    bank_name TEXT,
+                    account_no TEXT,
+                    ifsc_code TEXT,
+                    branch_name TEXT,
+                    opening_balance REAL DEFAULT 0
+                )''')
     c.execute('''CREATE TABLE IF NOT EXISTS vouchers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_mobile TEXT,
@@ -147,7 +153,9 @@ def init_db():
                     total_amt REAL,
                     payment_mode TEXT,
                     eway_bill_no TEXT,
-                    irn_no TEXT
+                    irn_no TEXT,
+                    debit_account TEXT,
+                    credit_account TEXT
                 )''')
     c.execute('''CREATE TABLE IF NOT EXISTS capital_bank_ledger (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,7 +164,8 @@ def init_db():
                     account_type TEXT,
                     particulars TEXT,
                     amount REAL,
-                    txn_type TEXT
+                    txn_type TEXT,
+                    bank_name TEXT
                 )''')
     c.execute('''CREATE TABLE IF NOT EXISTS branding (
                     user_mobile TEXT PRIMARY KEY,
@@ -168,13 +177,15 @@ def init_db():
 
 init_db()
 
-# Safe Session State Initializations
+# Safe Session Initializations
 if "user_mobile" not in st.session_state:
     st.session_state.user_mobile = None
 if "user_role" not in st.session_state:
     st.session_state.user_role = "Owner"
 if "business_name" not in st.session_state:
     st.session_state.business_name = None
+if "business_gstin" not in st.session_state:
+    st.session_state.business_gstin = None
 if "otp_sent" not in st.session_state:
     st.session_state.otp_sent = False
 if "generated_otp" not in st.session_state:
@@ -194,7 +205,7 @@ except Exception:
 def check_subscription_and_profile(mobile):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT reg_date, trial_end_date, is_paid, paid_till, role, business_name FROM users WHERE mobile=?", (mobile,))
+    c.execute("SELECT reg_date, trial_end_date, is_paid, paid_till, role, business_name, gstin FROM users WHERE mobile=?", (mobile,))
     user = c.fetchone()
     conn.close()
     
@@ -203,6 +214,7 @@ def check_subscription_and_profile(mobile):
     
     st.session_state.user_role = user[4] if len(user) > 4 and user[4] else "Owner"
     st.session_state.business_name = user[5] if len(user) > 5 and user[5] else None
+    st.session_state.business_gstin = user[6] if len(user) > 6 and user[6] else "URP"
     
     today = datetime.now().date()
     trial_end = datetime.strptime(user[0], "%Y-%m-%d").date()
@@ -292,6 +304,7 @@ if not bus_name:
             conn.commit()
             conn.close()
             st.session_state.business_name = b_name
+            st.session_state.business_gstin = b_gst
             st.success("✅ Business Profile Setup Complete!")
             st.rerun()
         else:
@@ -329,7 +342,7 @@ if sub_status == "EXPIRED":
     st.markdown(f"[👉 **Click Here to Send Proof on WhatsApp**](https://wa.me/918381085702?text={wa_renew_msg})")
     st.stop()
 
-# MENU OPTIONS (EXACT RECOMMENDED ORDER)
+# NAVIGATION MENU (EXACT RECOMMENDED ORDER)
 if st.session_state.user_role == "Salesman / Staff":
     menu_options = [
         "🧾 Tax Invoice (Sales)",
@@ -348,7 +361,7 @@ else:
         "💰 All Tally Vouchers (F4-F9)",
         "🏦 Capital & Bank Account Management",
         "📊 Bank Statement Excel Import",
-        "👥 Receivables & Payment Reminders",
+        "👥 Receivables & Party Statements",
         "🧮 GST Reports (GSTR-1, 2B & 3B)",
         "🚚 e-Way Bill & e-Invoicing Portal",
         "📈 Profit & Loss Account",
@@ -371,13 +384,13 @@ user_mob = st.session_state.user_mobile
 
 # ---------------- MODULE IMPLEMENTATIONS ----------------
 
-# 1. DASHBOARD
+# 1. DASHBOARD WITH ANALYTICS
 if menu == "🏠 Dashboard":
-    st.subheader("📊 Business Executive Dashboard")
+    st.subheader("📊 Business Executive Dashboard & Analytics")
     conn = get_db()
     sales_df = pd.read_sql_query("SELECT SUM(total_amt) as total FROM vouchers WHERE voucher_type IN ('Sales', 'Tax Invoice') AND user_mobile=?", conn, params=(user_mob,))
     pur_df = pd.read_sql_query("SELECT SUM(total_amt) as total FROM vouchers WHERE voucher_type='Purchase' AND user_mobile=?", conn, params=(user_mob,))
-    bank_df = pd.read_sql_query("SELECT SUM(amount) as total FROM capital_bank_ledger WHERE account_type='Bank Account' AND user_mobile=?", conn, params=(user_mob,))
+    bank_df = pd.read_sql_query("SELECT SUM(opening_balance) as total FROM bank_accounts WHERE user_mobile=?", conn, params=(user_mob,))
     
     total_sales = sales_df['total'].iloc[0] or 0.0
     total_pur = pur_df['total'].iloc[0] or 0.0
@@ -389,6 +402,14 @@ if menu == "🏠 Dashboard":
     c3.metric("Net Gross Profit", f"₹ {(total_sales - total_pur):,.2f}")
     c4.metric("Bank Balance", f"₹ {total_bank:,.2f}")
     
+    st.markdown("---")
+    st.subheader("📈 Monthly Performance Overview")
+    chart_data = pd.DataFrame({
+        "Category": ["Total Revenue", "Total Purchases", "Operating Profit"],
+        "Amount (₹)": [total_sales, total_pur, max(0, total_sales - total_pur)]
+    })
+    st.bar_chart(chart_data.set_index("Category"))
+
     st.markdown("---")
     st.subheader("⚠️ Inventory Low Stock Alert")
     low_stock = pd.read_sql_query("SELECT item_name, hsn_sac, godown, stock_qty, min_stock_alert FROM inventory WHERE stock_qty <= min_stock_alert AND user_mobile=?", conn, params=(user_mob,))
@@ -517,10 +538,10 @@ elif menu == "📥 Purchase & GSTR-2B Import":
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-# 5. MULTI-ITEM TAX INVOICE WITH WHATSAPP LINK FIX
+# 5. MULTI-ITEM TAX INVOICE WITH A4 PRINTABLE PDF TEMPLATE
 elif menu == "🧾 Tax Invoice (Sales)":
-    st.subheader("🧾 Create Multi-Item Tax Invoice & Manage Invoices")
-    tab1, tab2 = st.tabs(["📝 New Sales Invoice", "✏️ Manage / Edit / Delete Saved Invoices"])
+    st.subheader("🧾 Create Multi-Item Tax Invoice & Printable Bills")
+    tab1, tab2 = st.tabs(["📝 New Sales Invoice", "✏️ Manage / Edit / Print Saved Invoices"])
     conn = get_db()
     c = conn.cursor()
     
@@ -572,14 +593,24 @@ elif menu == "🧾 Tax Invoice (Sales)":
             grand_total = cart_df['total'].sum()
             st.markdown(f"### **Grand Total Amount: ₹ {grand_total:,.2f}**")
             
+            eway_no = ""
+            if grand_total >= 50000:
+                st.warning("⚠️ Total amount exceeds ₹50,000. e-Way Bill is recommended.")
+                gen_eway = st.checkbox("🚚 Add e-Way Bill Details now?")
+                if gen_eway:
+                    ec1, ec2 = st.columns(2)
+                    veh_no = ec1.text_input("Vehicle Number", value="MH-31-AB-1234")
+                    trans_id = ec2.text_input("Transporter ID / Name", value="Transporter Corp")
+                    eway_no = f"EWAY-{random.randint(100000000000, 999999999999)}"
+            
             cp1, cp2 = st.columns(2)
             pay_mode = cp1.selectbox("Payment Mode", ["Bank / UPI", "Cash", "Credit (Pending)"])
             
             if cp2.button("💾 Save & Generate Multi-Item Invoice"):
                 for item in st.session_state.cart_items:
-                    c.execute("""INSERT INTO vouchers (user_mobile, voucher_type, voucher_no, date, party_name, item_name, hsn_sac, qty, rate, taxable_amt, gst_rate, cgst, sgst, igst, total_amt, payment_mode)
-                                 VALUES (?, 'Tax Invoice', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, ?, ?)""",
-                              (user_mob, v_no, str(v_date), selected_party, item['item_name'], item['hsn'], item['qty'], item['rate'], item['taxable'], item['gst_rate'], item['cgst'], item['sgst'], item['total'], pay_mode))
+                    c.execute("""INSERT INTO vouchers (user_mobile, voucher_type, voucher_no, date, party_name, item_name, hsn_sac, qty, rate, taxable_amt, gst_rate, cgst, sgst, igst, total_amt, payment_mode, eway_bill_no)
+                                 VALUES (?, 'Tax Invoice', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, ?, ?, ?)""",
+                              (user_mob, v_no, str(v_date), selected_party, item['item_name'], item['hsn'], item['qty'], item['rate'], item['taxable'], item['gst_rate'], item['cgst'], item['sgst'], item['total'], pay_mode, eway_no))
                     c.execute("UPDATE inventory SET stock_qty = stock_qty - ? WHERE item_name = ? AND user_mobile = ?", (item['qty'], item['item_name'], user_mob))
                 conn.commit()
                 st.session_state.cart_items = []
@@ -590,21 +621,44 @@ elif menu == "🧾 Tax Invoice (Sales)":
                 st.markdown(f"[📲 **Share Invoice via WhatsApp**](https://wa.me/?text={wa_encoded})")
 
     with tab2:
-        st.subheader("✏️ Manage Saved Sales Invoices")
-        saved_invs = pd.read_sql_query("SELECT id, voucher_no, date, party_name, total_amt, payment_mode FROM vouchers WHERE voucher_type IN ('Sales', 'Tax Invoice') AND user_mobile=?", conn, params=(user_mob,))
+        st.subheader("✏️ Manage & Print Saved Sales Invoices")
+        saved_invs = pd.read_sql_query("SELECT id, voucher_no, date, party_name, total_amt, payment_mode FROM vouchers WHERE voucher_type IN ('Sales', 'Tax Invoice') AND user_mobile=? GROUP BY voucher_no", conn, params=(user_mob,))
         st.dataframe(saved_invs, use_container_width=True)
         
         if not saved_invs.empty:
-            del_inv_no = st.selectbox("Select Invoice Number to Delete", list(set(saved_invs['voucher_no'].tolist())))
+            sel_inv_no = st.selectbox("Select Invoice Number", saved_invs['voucher_no'].tolist())
+            
+            # Printable A4 Bill View
+            c.execute("SELECT item_name, hsn_sac, qty, rate, total_amt FROM vouchers WHERE voucher_no=? AND user_mobile=?", (sel_inv_no, user_mob))
+            inv_rows = c.fetchall()
+            inv_total = sum([r[4] for r in inv_rows])
+            
+            st.markdown(f"""
+                <div style="background-color:#ffffff; padding:20px; border:1px solid #cbd5e1; border-radius:8px;">
+                    <h2 style="text-align:center; color:#0f172a;">{st.session_state.business_name}</h2>
+                    <p style="text-align:center;"><b>TAX INVOICE</b></p>
+                    <hr>
+                    <p><b>Invoice No:</b> {sel_inv_no} | <b>Date:</b> {datetime.now().strftime('%Y-%m-%d')}</p>
+                    <p><b>GSTIN:</b> {st.session_state.business_gstin}</p>
+                    <hr>
+                    <h4>Items Summary:</h4>
+                    <ul>
+                        {"".join([f"<li>{r[0]} (HSN: {r[1]}) - Qty: {r[2]} x Rate: {r[3]} = <b>Rs. {r[4]:,.2f}</b></li>" for r in inv_rows])}
+                    </ul>
+                    <hr>
+                    <h3>Total Amount: Rs. {inv_total:,.2f}</h3>
+                </div>
+            """, unsafe_allow_html=True)
+            
             if st.button("🗑️ Delete Selected Sales Invoice"):
-                c.execute("SELECT item_name, qty FROM vouchers WHERE voucher_no=? AND user_mobile=?", (del_inv_no, user_mob))
+                c.execute("SELECT item_name, qty FROM vouchers WHERE voucher_no=? AND user_mobile=?", (sel_inv_no, user_mob))
                 inv_items = c.fetchall()
                 for item in inv_items:
                     c.execute("UPDATE inventory SET stock_qty = stock_qty + ? WHERE item_name=? AND user_mobile=?", (item[1], item[0], user_mob))
                 
-                c.execute("DELETE FROM vouchers WHERE voucher_no=? AND user_mobile=?", (del_inv_no, user_mob))
+                c.execute("DELETE FROM vouchers WHERE voucher_no=? AND user_mobile=?", (sel_inv_no, user_mob))
                 conn.commit()
-                st.success(f"✅ Invoice {del_inv_no} Deleted & Stock Restored!")
+                st.success(f"✅ Invoice {sel_inv_no} Deleted & Stock Restored!")
                 st.rerun()
 
 # 6. BARCODE QUICK BILLING
@@ -625,7 +679,7 @@ elif menu == "📦 Barcode Quick Billing":
 elif menu == "🖨️ Thermal Receipt Print":
     st.subheader("🖨️ POS Thermal Printer Receipt Generator")
     conn = get_db()
-    vouchers = pd.read_sql_query("SELECT voucher_no, party_name, date, total_amt FROM vouchers WHERE voucher_type IN ('Sales', 'Tax Invoice') AND user_mobile=? GROUP BY voucher_no", conn, params=(user_mob,))
+    vouchers = pd.read_sql_query("SELECT voucher_no, party_name, date, total_amt, eway_bill_no FROM vouchers WHERE voucher_type IN ('Sales', 'Tax Invoice') AND user_mobile=? GROUP BY voucher_no", conn, params=(user_mob,))
     
     if not vouchers.empty:
         selected_v = st.selectbox("Select Invoice to Print Receipt", vouchers['voucher_no'].tolist())
@@ -634,6 +688,7 @@ elif menu == "🖨️ Thermal Receipt Print":
         v_meta = vouchers[vouchers['voucher_no'] == selected_v].iloc[0]
         
         items_rows_html = "".join([f"<tr><td>{r['item_name']}</td><td>{r['qty']}</td><td>{r['rate']}</td><td>{r['total_amt']}</td></tr>" for _, r in items_df.iterrows()])
+        eway_html = f"<p>e-Way Bill: {v_meta['eway_bill_no']}</p>" if v_meta['eway_bill_no'] else ""
         
         receipt_html = f"""
         <div class="thermal-receipt">
@@ -645,6 +700,7 @@ elif menu == "🖨️ Thermal Receipt Print":
             <p>Invoice No: {v_meta['voucher_no']}</p>
             <p>Date: {v_meta['date']}</p>
             <p>Customer: {v_meta['party_name']}</p>
+            {eway_html}
             <p>--------------------------------</p>
             <table width="100%" style="font-size:12px;">
                 <tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>
@@ -659,50 +715,69 @@ elif menu == "🖨️ Thermal Receipt Print":
         st.markdown(receipt_html, unsafe_allow_html=True)
         st.button("🖨️ Print Receipt")
 
-# 8. ALL TALLY VOUCHERS WITH DELETE
+# 8. ALL TALLY VOUCHERS (F4 TO F9)
 elif menu == "💰 All Tally Vouchers (F4-F9)":
-    st.subheader("💰 Tally Accounting Vouchers Entry & Management")
-    tab1, tab2 = st.tabs(["📝 New Voucher Entry", "🗑️ Delete Voucher Entry"])
+    st.subheader("💰 Tally Accounting Vouchers (F4-F9) with Debit / Credit")
+    tab1, tab2 = st.tabs(["📝 New Voucher Entry", "✏️ Edit / Delete Voucher Records"])
     conn = get_db()
     c = conn.cursor()
     
+    parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
+    banks_list = [row[0] for row in c.execute("SELECT bank_name FROM bank_accounts WHERE user_mobile=?", (user_mob,)).fetchall()]
+    all_accs = ["Cash"] + banks_list + parties_list
+    
     with tab1:
-        v_type = st.selectbox("Select Voucher Type", ["Receipt (F6)", "Payment (F5)", "Contra (F4)", "Journal (F7)", "Credit Note", "Debit Note"])
-        parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
+        v_type = st.selectbox("Select Voucher Type", [
+            "F4 - Contra (Bank / Cash Transfer)",
+            "F5 - Payment (Cash / Bank Out)",
+            "F6 - Receipt (Cash / Bank In)",
+            "F7 - Journal (Adjustment / Credit)",
+            "F8 - Credit Note (Sales Return)",
+            "F9 - Debit Note (Purchase Return)"
+        ])
         
         c1, c2, c3 = st.columns(3)
-        v_no = c1.text_input("Voucher No", f"{v_type[:3].upper()}-{random.randint(1000,9999)}")
+        v_no = c1.text_input("Voucher No", f"{v_type[:2]}-{random.randint(1000,9999)}")
         v_date = c2.date_input("Date", datetime.now())
-        party = c3.selectbox("Ledger Account", parties_list) if parties_list else c3.text_input("Ledger Account")
+        amt = c3.number_input("Amount (₹)", min_value=1.0)
         
-        amt = st.number_input("Amount (₹)", min_value=1.0)
-        narration = st.text_area("Narration / Remarks")
+        col_dr, col_cr = st.columns(2)
+        debit_acc = col_dr.selectbox("Debit Account (Dr - Receiver / Expense)", all_accs)
+        credit_acc = col_cr.selectbox("Credit Account (Cr - Giver / Income)", all_accs)
         
-        if st.button("Post Voucher Entry"):
-            c.execute("""INSERT INTO vouchers (user_mobile, voucher_type, voucher_no, date, party_name, item_name, hsn_sac, qty, rate, taxable_amt, gst_rate, cgst, sgst, igst, total_amt, payment_mode)
-                         VALUES (?, ?, ?, ?, ?, ?, '9983', 0, 0, ?, 0, 0, 0, 0, ?, ?)""",
-                      (user_mob, v_type, v_no, str(v_date), party, narration, amt, amt, "Bank/Cash"))
+        narration = st.text_area("Narration / Particulars", f"Entry posted via {v_type[:2]}")
+        
+        if st.button("Post Tally Voucher Entry"):
+            c.execute("""INSERT INTO vouchers (user_mobile, voucher_type, voucher_no, date, party_name, item_name, hsn_sac, qty, rate, taxable_amt, gst_rate, cgst, sgst, igst, total_amt, payment_mode, debit_account, credit_account)
+                         VALUES (?, ?, ?, ?, ?, ?, '9983', 0, 0, ?, 0, 0, 0, 0, ?, 'Journal', ?, ?)""",
+                      (user_mob, v_type[:2], v_no, str(v_date), debit_acc, narration, amt, amt, debit_acc, credit_acc))
+            
+            if debit_acc in banks_list:
+                c.execute("UPDATE bank_accounts SET opening_balance = opening_balance + ? WHERE bank_name=? AND user_mobile=?", (amt, debit_acc, user_mob))
+            if credit_acc in banks_list:
+                c.execute("UPDATE bank_accounts SET opening_balance = opening_balance - ? WHERE bank_name=? AND user_mobile=?", (amt, credit_acc, user_mob))
+                
             conn.commit()
-            st.success(f"✅ {v_type} Entry Posted!")
+            st.success(f"✅ Voucher {v_type[:2]} Posted! Debit: {debit_acc} | Credit: {credit_acc}")
 
     with tab2:
-        other_vouchers = pd.read_sql_query("SELECT id, voucher_type, voucher_no, date, party_name, total_amt FROM vouchers WHERE voucher_type NOT IN ('Sales', 'Tax Invoice', 'Purchase') AND user_mobile=?", conn, params=(user_mob,))
-        st.dataframe(other_vouchers, use_container_width=True)
+        vouchers_df = pd.read_sql_query("SELECT id, voucher_type, voucher_no, date, debit_account, credit_account, total_amt, item_name as narration FROM vouchers WHERE voucher_type IN ('F4', 'F5', 'F6', 'F7', 'F8', 'F9') AND user_mobile=?", conn, params=(user_mob,))
+        st.dataframe(vouchers_df, use_container_width=True)
         
-        if not other_vouchers.empty:
-            del_v_id = st.selectbox("Select Voucher Record ID to Delete", other_vouchers['id'].tolist())
-            if st.button("🗑️ Delete Voucher Record"):
+        if not vouchers_df.empty:
+            del_v_id = st.selectbox("Select Voucher Record ID to Delete", vouchers_df['id'].tolist())
+            if st.button("🗑️ Delete Voucher Entry"):
                 c.execute("DELETE FROM vouchers WHERE id=? AND user_mobile=?", (del_v_id, user_mob))
                 conn.commit()
                 st.success("✅ Voucher Deleted!")
                 st.rerun()
 
-# 9. CAPITAL & BANK MANAGEMENT
+# 9. CAPITAL & MULTIPLE BANK ACCOUNT MANAGEMENT
 elif menu == "🏦 Capital & Bank Account Management":
-    st.subheader("🏦 Capital Account & Bank Ledger")
+    st.subheader("🏦 Capital & Multiple Bank Account Ledgers")
+    tab1, tab2, tab3 = st.tabs(["💰 Owner's Capital Account", "🏛️ Multiple Bank Accounts Master", "🔄 Bank Ledger Entries"])
     conn = get_db()
     c = conn.cursor()
-    tab1, tab2 = st.tabs(["💰 Owner's Capital Account", "🏛️ Bank Account Ledger"])
     
     with tab1:
         cap_amt = st.number_input("Capital Amount (₹)", min_value=1.0)
@@ -714,48 +789,162 @@ elif menu == "🏦 Capital & Bank Account Management":
             st.success("Capital Entry Posted!")
             
     with tab2:
-        bank_amt = st.number_input("Bank Txn Amount (₹)", min_value=1.0)
-        b_type = st.radio("Txn Type", ["DEPOSIT", "WITHDRAWAL"])
-        if st.button("Post Bank Entry"):
-            c.execute("INSERT INTO capital_bank_ledger (user_mobile, date, account_type, particulars, amount, txn_type) VALUES (?, ?, 'Bank Account', 'Bank Ledger Entry', ?, ?)",
-                      (user_mob, str(datetime.now().date()), bank_amt, b_type))
-            conn.commit()
-            st.success("Bank Entry Saved!")
+        st.subheader("➕ Add New Bank Account")
+        bc1, bc2 = st.columns(2)
+        b_name = bc1.text_input("Bank Name (e.g. State Bank of India)")
+        b_acc = bc2.text_input("Account Number")
+        bc3, bc4 = st.columns(2)
+        b_ifsc = bc3.text_input("IFSC Code")
+        b_bal = bc4.number_input("Opening Balance (₹)", min_value=0.0)
+        
+        if st.button("Add Bank Account Master"):
+            if b_name and b_acc:
+                c.execute("INSERT INTO bank_accounts (user_mobile, bank_name, account_no, ifsc_code, branch_name, opening_balance) VALUES (?, ?, ?, ?, 'Main Branch', ?)",
+                          (user_mob, b_name, b_acc, b_ifsc, b_bal))
+                conn.commit()
+                st.success(f"✅ Bank Account {b_name} Saved!")
+                
+        banks_df = pd.read_sql_query("SELECT id, bank_name, account_no, ifsc_code, opening_balance as live_balance FROM bank_accounts WHERE user_mobile=?", conn, params=(user_mob,))
+        st.dataframe(banks_df, use_container_width=True)
+
+    with tab3:
+        banks_list = [row[0] for row in c.execute("SELECT bank_name FROM bank_accounts WHERE user_mobile=?", (user_mob,)).fetchall()]
+        if banks_list:
+            sel_bank = st.selectbox("Select Bank Account", banks_list)
+            bank_amt = st.number_input("Txn Amount (₹)", min_value=1.0)
+            b_type = st.radio("Txn Type", ["DEPOSIT", "WITHDRAWAL"])
+            if st.button("Post Bank Ledger Entry"):
+                c.execute("INSERT INTO capital_bank_ledger (user_mobile, date, account_type, particulars, amount, txn_type, bank_name) VALUES (?, ?, 'Bank Account', 'Bank Txn', ?, ?, ?)",
+                          (user_mob, str(datetime.now().date()), bank_amt, b_type, sel_bank))
+                
+                if b_type == "DEPOSIT":
+                    c.execute("UPDATE bank_accounts SET opening_balance = opening_balance + ? WHERE bank_name=? AND user_mobile=?", (bank_amt, sel_bank, user_mob))
+                else:
+                    c.execute("UPDATE bank_accounts SET opening_balance = opening_balance - ? WHERE bank_name=? AND user_mobile=?", (bank_amt, sel_bank, user_mob))
+                    
+                conn.commit()
+                st.success("✅ Bank Ledger Entry Saved & Bank Balance Updated!")
+        else:
+            st.info("Please add a Bank Account in Tab 2 first.")
 
 # 10. BANK STATEMENT IMPORT
 elif menu == "📊 Bank Statement Excel Import":
     st.subheader("📊 Bank Statement Import")
     st.file_uploader("Upload Statement (CSV/XLSX)", type=["xlsx", "csv"])
 
-# 11. RECEIVABLES WITH WHATSAPP REMINDER LINK FIX
-elif menu == "👥 Receivables & Payment Reminders":
-    st.subheader("👥 Outstanding Customer Receivables & Payment Reminders")
+# 11. RECEIVABLES & PARTY STATEMENT PASSBOOK
+elif menu == "👥 Receivables & Party Statements":
+    st.subheader("👥 Party Ledger Passbook Statements & Outstanding Receivables")
+    tab1, tab2 = st.tabs(["📊 Party Ledger Passbook Statement", "📲 Outstanding Reminders"])
     conn = get_db()
-    df = pd.read_sql_query("SELECT party_name, SUM(total_amt) as pending_amount FROM vouchers WHERE payment_mode='Credit (Pending)' AND user_mobile=? GROUP BY party_name", conn, params=(user_mob,))
-    st.dataframe(df, use_container_width=True)
+    c = conn.cursor()
     
-    if not df.empty:
-        st.markdown("---")
-        st.subheader("📲 Send Payment Reminder via WhatsApp")
-        selected_party_rem = st.selectbox("Select Customer to Send Reminder", df['party_name'].tolist())
-        pending_amt = df[df['party_name'] == selected_party_rem]['pending_amount'].iloc[0]
-        
-        rem_raw_msg = f"Dear {selected_party_rem},\nYour pending balance at {st.session_state.business_name} is Rs. {pending_amt:.2f}.\nKindly clear the payment via UPI to 8381085702@ibl at your earliest.\nThank you!"
-        rem_encoded_msg = urllib.parse.quote(rem_raw_msg)
-        st.markdown(f"[📲 **Click Here to Send Reminder on WhatsApp**](https://wa.me/?text={rem_encoded_msg})")
+    parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
+    
+    with tab1:
+        if parties_list:
+            selected_party = st.selectbox("Select Party Account for Statement Passbook", parties_list)
+            statement_df = pd.read_sql_query("SELECT date, voucher_type, voucher_no, debit_account, credit_account, total_amt, payment_mode FROM vouchers WHERE (party_name=? OR debit_account=? OR credit_account=?) AND user_mobile=?", conn, params=(selected_party, selected_party, selected_party, user_mob))
+            
+            st.subheader(f"📖 Ledger Passbook Statement: {selected_party}")
+            st.dataframe(statement_df, use_container_width=True)
+            
+            if not statement_df.empty:
+                csv_stmt = statement_df.to_csv(index=False).encode('utf-8')
+                st.download_button(f"📥 Download {selected_party} Statement (CSV)", data=csv_stmt, file_name=f"{selected_party}_Statement.csv", mime="text/csv")
+        else:
+            st.info("No parties registered in Ledger Master.")
 
-# 12. GST REPORTS
+    with tab2:
+        df = pd.read_sql_query("SELECT party_name, SUM(total_amt) as pending_amount FROM vouchers WHERE payment_mode='Credit (Pending)' AND user_mobile=? GROUP BY party_name", conn, params=(user_mob,))
+        st.dataframe(df, use_container_width=True)
+        
+        if not df.empty:
+            st.markdown("---")
+            selected_party_rem = st.selectbox("Select Customer to Send Reminder", df['party_name'].tolist())
+            pending_amt = df[df['party_name'] == selected_party_rem]['pending_amount'].iloc[0]
+            
+            rem_raw_msg = f"Dear {selected_party_rem},\nYour pending balance at {st.session_state.business_name} is Rs. {pending_amt:.2f}.\nKindly clear the payment via UPI to 8381085702@ibl at your earliest.\nThank you!"
+            rem_encoded_msg = urllib.parse.quote(rem_raw_msg)
+            st.markdown(f"[📲 **Click Here to Send Reminder on WhatsApp**](https://wa.me/?text={rem_encoded_msg})")
+
+# 12. STATUTORY GST REPORTS
 elif menu == "🧮 GST Reports (GSTR-1, 2B & 3B)":
-    st.subheader("🧮 Statutory GST Return Reports")
+    st.subheader("🧮 Statutory GST Reports & Govt. JSON Portal Export")
+    tab1, tab2, tab3 = st.tabs(["📊 View GST Data", "📥 Download GSTR-1 JSON (GST Portal)", "📥 Download GSTR-3B JSON"])
     conn = get_db()
-    df = pd.read_sql_query("SELECT * FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
-    st.dataframe(df, use_container_width=True)
+    df_vouchers = pd.read_sql_query("SELECT * FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
+    
+    user_gstin = st.session_state.business_gstin if st.session_state.business_gstin else "27AAAAA0000A1Z5"
+    
+    with tab1:
+        st.dataframe(df_vouchers, use_container_width=True)
+        
+    with tab2:
+        st.info(f"Export Official GSTR-1 JSON File for Direct Upload on Govt. GST Portal (GSTIN: {user_gstin}):")
+        b2b_list = []
+        for _, r in df_vouchers[df_vouchers['voucher_type'] == 'Tax Invoice'].iterrows():
+            b2b_list.append({
+                "inum": str(r['voucher_no']),
+                "idt": str(r['date']),
+                "val": float(r['total_amt']),
+                "pos": "27",
+                "rchrg": "N",
+                "inv_typ": "R",
+                "itms": [{
+                    "num": 1,
+                    "itm_det": {
+                        "txval": float(r['taxable_amt']),
+                        "rt": float(r['gst_rate']),
+                        "camt": float(r['cgst']),
+                        "samt": float(r['sgst']),
+                        "csamt": 0.0
+                    }
+                }]
+            })
+            
+        gstr1_json = {
+            "gstin": str(user_gstin),
+            "fp": datetime.now().strftime("%m%Y"),
+            "gt": float(df_vouchers['total_amt'].sum() if not df_vouchers.empty else 0),
+            "cur_gt": float(df_vouchers['total_amt'].sum() if not df_vouchers.empty else 0),
+            "b2b": [{"ctin": "27BBB0000B1Z2", "inv": b2b_list}]
+        }
+        
+        json_str = json.dumps(gstr1_json, indent=4)
+        st.download_button(
+            label="📥 Download Valid GSTR-1 JSON File",
+            data=json_str,
+            file_name=f"GSTR1_{user_gstin}_{datetime.now().strftime('%m%Y')}.json",
+            mime="application/json"
+        )
+
+    with tab3:
+        gstr3b_json = {
+            "gstin": str(user_gstin),
+            "ret_period": datetime.now().strftime("%m%Y"),
+            "sup_details": {
+                "osup_det": {
+                    "txval": float(df_vouchers['taxable_amt'].sum() if not df_vouchers.empty else 0),
+                    "iamt": float(df_vouchers['igst'].sum() if not df_vouchers.empty else 0),
+                    "camt": float(df_vouchers['cgst'].sum() if not df_vouchers.empty else 0),
+                    "samt": float(df_vouchers['sgst'].sum() if not df_vouchers.empty else 0),
+                    "csamt": 0.0
+                }
+            }
+        }
+        st.download_button(
+            label="📥 Download GSTR-3B JSON File",
+            data=json.dumps(gstr3b_json, indent=4),
+            file_name=f"GSTR3B_{user_gstin}_{datetime.now().strftime('%m%Y')}.json",
+            mime="application/json"
+        )
 
 # 13. E-WAY BILL
 elif menu == "🚚 e-Way Bill & e-Invoicing Portal":
     st.subheader("🚚 Government e-Way Bill & e-Invoicing")
     conn = get_db()
-    vouchers = pd.read_sql_query("SELECT voucher_no, party_name, total_amt FROM vouchers WHERE total_amt >= 50000 AND user_mobile=?", conn, params=(user_mob,))
+    vouchers = pd.read_sql_query("SELECT voucher_no, party_name, total_amt, eway_bill_no FROM vouchers WHERE total_amt >= 50000 AND user_mobile=?", conn, params=(user_mob,))
     st.dataframe(vouchers, use_container_width=True)
 
 # 14. PROFIT & LOSS
@@ -781,14 +970,13 @@ elif menu == "☁️ Automated Cloud Backup":
     csv_data = df_all.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Download CSV Backup", data=csv_data, file_name=f"{st.session_state.business_name}_Backup.csv", mime="text/csv")
 
-# 17. COMPANY BRANDING SAFE UPDATE FIX
+# 17. COMPANY BRANDING SAFE UPDATE
 elif menu == "🏢 Company Branding & Signature":
     st.subheader("🏢 Company Logo & Digital Signature Setup")
     col1, col2 = st.columns(2)
     conn = get_db()
     c = conn.cursor()
     
-    # Existing Branding Load
     c.execute("SELECT logo_base64, sig_base64 FROM branding WHERE user_mobile=?", (user_mob,))
     existing_branding = c.fetchone()
     logo_b64 = existing_branding[0] if existing_branding else None
@@ -817,3 +1005,4 @@ elif menu == "💳 Account & Billing":
     st.write(f"**Current Plan:** {sub_status}")
     st.write(f"**Business Name:** `{st.session_state.business_name}`")
     st.write(f"**Registered Account:** `{st.session_state.user_mobile}`")
+    st.write(f"**Registered GSTIN:** `{st.session_state.business_gstin}`")

@@ -4048,13 +4048,6 @@ elif accounting_menu == "📦 Stock Report":
 # ============================================================
 # STEP 2B END
 # ============================================================
-
-st.markdown("---")
-
-st.caption(
-    "SD TALLY BUSINESS ENTERPRISE • STEP 2B • "
-    "Vouchers + Accounting + Reports"
-)
 # ============================================================
 # STEP 3 — VOUCHERS + ACCOUNTING
 # ============================================================

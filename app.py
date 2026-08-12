@@ -7,6 +7,7 @@ import json
 import base64
 import urllib.parse
 from datetime import datetime, timedelta
+import streamlit.components.v1 as components
 
 try:
     import plotly.express as px
@@ -72,16 +73,11 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
     }
     .stButton>button:hover { background-color: #0369a1; }
-
-    .thermal-receipt {
-        background-color: #ffffff; color: #000000; padding: 15px; border: 1px dashed #000;
-        font-family: 'Courier New', Courier, monospace; width: 300px; margin: auto;
-    }
     </style>
 """, unsafe_allow_html=True)
 
 # Database Initialization
-DB_FILE = "sd_tally_v12_master.db"
+DB_FILE = "sd_tally_v15_master.db"
 
 def get_db():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -342,7 +338,7 @@ if sub_status == "EXPIRED":
     st.markdown(f"[👉 **Click Here to Send Proof on WhatsApp**](https://wa.me/918381085702?text={wa_renew_msg})")
     st.stop()
 
-# NAVIGATION MENU (EXACT RECOMMENDED ORDER)
+# NAVIGATION MENU
 if st.session_state.user_role == "Salesman / Staff":
     menu_options = [
         "🧾 Tax Invoice (Sales)",
@@ -538,7 +534,7 @@ elif menu == "📥 Purchase & GSTR-2B Import":
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-# 5. MULTI-ITEM TAX INVOICE WITH A4 PRINTABLE PDF TEMPLATE
+# 5. MULTI-ITEM TAX INVOICE WITH PRINT FIX
 elif menu == "🧾 Tax Invoice (Sales)":
     st.subheader("🧾 Create Multi-Item Tax Invoice & Printable Bills")
     tab1, tab2 = st.tabs(["📝 New Sales Invoice", "✏️ Manage / Edit / Print Saved Invoices"])
@@ -628,7 +624,6 @@ elif menu == "🧾 Tax Invoice (Sales)":
         if not saved_invs.empty:
             sel_inv_no = st.selectbox("Select Invoice Number", saved_invs['voucher_no'].tolist())
             
-            # Printable A4 Bill View
             c.execute("SELECT item_name, hsn_sac, qty, rate, total_amt FROM vouchers WHERE voucher_no=? AND user_mobile=?", (sel_inv_no, user_mob))
             inv_rows = c.fetchall()
             inv_total = sum([r[4] for r in inv_rows])
@@ -675,7 +670,7 @@ elif menu == "📦 Barcode Quick Billing":
         else:
             st.error("Barcode ID not found.")
 
-# 7. THERMAL RECEIPT PRINT
+# 7. THERMAL RECEIPT PRINT (100% PERFECT POS RENDER FIX)
 elif menu == "🖨️ Thermal Receipt Print":
     st.subheader("🖨️ POS Thermal Printer Receipt Generator")
     conn = get_db()
@@ -687,33 +682,37 @@ elif menu == "🖨️ Thermal Receipt Print":
         items_df = pd.read_sql_query("SELECT item_name, qty, rate, total_amt FROM vouchers WHERE voucher_no=? AND user_mobile=?", conn, params=(selected_v, user_mob))
         v_meta = vouchers[vouchers['voucher_no'] == selected_v].iloc[0]
         
-        items_rows_html = "".join([f"<tr><td>{r['item_name']}</td><td>{r['qty']}</td><td>{r['rate']}</td><td>{r['total_amt']}</td></tr>" for _, r in items_df.iterrows()])
-        eway_html = f"<p>e-Way Bill: {v_meta['eway_bill_no']}</p>" if v_meta['eway_bill_no'] else ""
+        items_tr = "".join([f"<tr><td style='padding:3px;'>{r['item_name']}</td><td style='padding:3px;'>{r['qty']}</td><td style='padding:3px;'>{r['rate']}</td><td style='padding:3px;'>{r['total_amt']:.2f}</td></tr>" for _, r in items_df.iterrows()])
+        eway_str = f"<p style='margin:2px 0;'><b>e-Way Bill:</b> {v_meta['eway_bill_no']}</p>" if v_meta['eway_bill_no'] else ""
         
-        receipt_html = f"""
-        <div class="thermal-receipt">
+        # Isolated Pure Component Render (Prevents Raw Code Display)
+        html_receipt = f"""
+        <div style="background:#ffffff; color:#000; padding:15px; border:1px dashed #000; font-family:'Courier New', monospace; width:280px; margin:auto; border-radius:4px;">
             <center>
-                <h3><b>{st.session_state.business_name}</b></h3>
-                <p>Retail Tax Invoice</p>
-                <p>--------------------------------</p>
+                <h3 style="margin:0;"><b>{st.session_state.business_name}</b></h3>
+                <p style="margin:2px 0; font-size:12px;">Retail Tax Invoice</p>
+                <p style="margin:2px 0;">--------------------------------</p>
             </center>
-            <p>Invoice No: {v_meta['voucher_no']}</p>
-            <p>Date: {v_meta['date']}</p>
-            <p>Customer: {v_meta['party_name']}</p>
-            {eway_html}
-            <p>--------------------------------</p>
-            <table width="100%" style="font-size:12px;">
-                <tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr>
-                {items_rows_html}
+            <p style="margin:2px 0; font-size:12px;"><b>Invoice No:</b> {v_meta['voucher_no']}</p>
+            <p style="margin:2px 0; font-size:12px;"><b>Date:</b> {v_meta['date']}</p>
+            <p style="margin:2px 0; font-size:12px;"><b>Customer:</b> {v_meta['party_name']}</p>
+            {eway_str}
+            <p style="margin:2px 0;">--------------------------------</p>
+            <table width="100%" style="font-size:11px; border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:1px solid #000;"><th style="text-align:left;">Item</th><th style="text-align:left;">Qty</th><th style="text-align:left;">Rate</th><th style="text-align:left;">Total</th></tr>
+                </thead>
+                <tbody>
+                    {items_tr}
+                </tbody>
             </table>
-            <p>--------------------------------</p>
-            <p><b>GRAND TOTAL: Rs. {v_meta['total_amt']:.2f}</b></p>
-            <p>--------------------------------</p>
-            <center><p>Thank You! Visit Again.</p></center>
+            <p style="margin:2px 0;">--------------------------------</p>
+            <p style="margin:2px 0; font-size:13px;"><b>GRAND TOTAL: Rs. {v_meta['total_amt']:.2f}</b></p>
+            <p style="margin:2px 0;">--------------------------------</p>
+            <center><p style="margin:5px 0; font-size:11px;">Thank You! Visit Again.</p></center>
         </div>
         """
-        st.markdown(receipt_html, unsafe_allow_html=True)
-        st.button("🖨️ Print Receipt")
+        components.html(html_receipt, height=380, scrolling=True)
 
 # 8. ALL TALLY VOUCHERS (F4 TO F9)
 elif menu == "💰 All Tally Vouchers (F4-F9)":

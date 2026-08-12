@@ -10,7 +10,7 @@ try:
 except ModuleNotFoundError:
     px = None
 
-# Page Configuration & Executive High-Contrast Theme Setup
+# Page Configuration
 st.set_page_config(
     page_title="SD TALLY BUSINESS",
     layout="wide",
@@ -18,10 +18,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling for Clear Readability & Card Visibility
+# Custom Styling with Mobile Scroll Fix & High Contrast Theme
 st.markdown("""
     <style>
-    /* Main Background & Fonts */
+    /* Fix Mobile Scrolling Problem */
+    html, body, [data-testid="stAppViewContainer"] {
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    
     .stApp { background-color: #f8fafc; color: #0f172a; }
     
     /* Sidebar High-Visibility Text Fix */
@@ -109,7 +114,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Database Initialization (Multi-Tenant Engine with User Mobile Filtering)
+# Database Initialization
 DB_FILE = "sd_tally_v5_master.db"
 
 def get_db():
@@ -189,9 +194,14 @@ def init_db():
 
 init_db()
 
-# Session State Initializations
-if "user_mobile" not in st.session_state:
-    st.session_state.user_mobile = None
+# Auto Login Persistence check using Query Params (रिफ्रेश केल्यावर ऑटोमॅटिक लॉगिन राहण्यासाठी)
+query_params = st.query_params
+saved_mobile = query_params.get("user", None)
+
+if "user_mobile" not in st.session_state or not st.session_state.user_mobile:
+    if saved_mobile:
+        st.session_state.user_mobile = saved_mobile
+
 if "user_role" not in st.session_state:
     st.session_state.user_role = "Owner"
 if "business_name" not in st.session_state:
@@ -228,7 +238,7 @@ def check_subscription_and_profile(mobile):
     
     return sub_status, st.session_state.business_name
 
-# 1. LOGIN SCREEN
+# 1. LOGIN SCREEN (जर युझर लॉगिन नसेल तरच दिसेल)
 if not st.session_state.user_mobile:
     st.markdown("""
         <div class="main-header">
@@ -257,6 +267,8 @@ if not st.session_state.user_mobile:
                 if otp_in == st.session_state.generated_otp:
                     st.session_state.user_mobile = mobile
                     st.session_state.user_role = role_sel
+                    st.query_params["user"] = mobile  # Save Session in URL Bar
+                    
                     conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT mobile FROM users WHERE mobile=?", (mobile,))
@@ -272,7 +284,7 @@ if not st.session_state.user_mobile:
                     st.error("Invalid OTP entered.")
     st.stop()
 
-# 2. CHECK PROFILE & ONBOARDING (BUSINESS PROFILE SETUP)
+# 2. CHECK PROFILE & ONBOARDING
 sub_status, bus_name = check_subscription_and_profile(st.session_state.user_mobile)
 
 if not bus_name:
@@ -318,6 +330,7 @@ if st.sidebar.button("🚪 Logout Account"):
     st.session_state.user_mobile = None
     st.session_state.business_name = None
     st.session_state.otp_sent = False
+    st.query_params.clear()  # Clear Saved Session
     st.rerun()
 
 if sub_status == "EXPIRED":
@@ -328,7 +341,7 @@ if sub_status == "EXPIRED":
     st.markdown("[👉 **Click Here to Send Proof on WhatsApp**](https://wa.me/918381085702?text=Hi,%20I%20have%20paid%20Rs.112.10%20for%20SD%20Tally%20Business.)")
     st.stop()
 
-# 18 NAVIGATION MENU OPTIONS
+# NAVIGATION MENU OPTIONS
 if st.session_state.user_role == "Salesman / Staff":
     menu_options = [
         "🧾 Tax Invoice (Sales)",
@@ -362,12 +375,11 @@ menu = st.sidebar.radio("Navigation Menu", menu_options)
 st.markdown(f"""
     <div class="main-header">
         <h1>{st.session_state.business_name}</h1>
-        <p>SD TALLY BUSINESS Enterprise Workspace | User: {st.session_state.user_mobile}</p>
+        <p>SD TALLY BUSINESS Enterprise Workspace | Account: {st.session_state.user_mobile}</p>
     </div>
 """, unsafe_allow_html=True)
 
-# ---------------- MODULES WITH USER-MOBILE ISOLATION ----------------
-
+# MODULE IMPLEMENTATIONS WITH USER-MOBILE FILTERING
 user_mob = st.session_state.user_mobile
 
 # 1. DASHBOARD
@@ -530,7 +542,7 @@ elif menu == "💰 All Tally Vouchers (F4-F9)":
         conn.commit()
         st.success(f"✅ {v_type} Entry Posted!")
 
-# REST OF MODULES...
+# OTHER MODULES
 elif menu == "📥 Purchase & GSTR-2B Import":
     st.subheader("📥 GSTR-2B Import")
     st.file_uploader("Upload GSTR-2B File", type=["csv", "xlsx"])

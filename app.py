@@ -4239,7 +4239,7 @@ elif menu == "🧾 Vouchers":
             ]
         )
 
-        narration = st.text_area(
+        narration = st.ttryyt_area(
             "Narration"
         )
 

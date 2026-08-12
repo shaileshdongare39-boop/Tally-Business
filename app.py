@@ -11233,8 +11233,7 @@ elif menu == "💳 Supplier Outstanding":
         st.metric(
             "Total Supplier Outstanding",
             money(
-                supplier_outstanding_df["Outstanding"]
-                .sum()
+                supplier_outstanding_df["Outstanding"].sum()
             )
-        ) 
-                    
+                ) 
+                

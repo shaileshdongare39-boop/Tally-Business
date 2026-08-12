@@ -10270,7 +10270,6 @@ elif menu == "📅 Daily Purchase Summary":
     conn.close()
 
     if daily_purchase_df.empty:
-if daily_purchase_df.empty:
 
         st.info("No Daily Purchase records available.")
 
@@ -10291,8 +10290,7 @@ if daily_purchase_df.empty:
         st.metric(
             "Total Purchase",
             money(total_purchase)
-        )
-
+                )
 
 # ============================================================
 # MONTHLY SALES SUMMARY

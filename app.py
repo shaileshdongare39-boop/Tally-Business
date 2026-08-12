@@ -4611,41 +4611,42 @@ elif menu == "🧾 Vouchers":
                     debit = amount
                     credit = 0
 
-                conn.execute("""
-                    INSERT INTO ledger
-                    (
-                        user_mobile,
-                        date,
-                        account_name,
-                        account_type,
+                try:
+                    conn.execute("""
+                        INSERT INTO ledger
+                        (
+                            user_mobile,
+                            date,
+                            account_name,
+                            account_type,
+                            voucher_type,
+                            voucher_no,
+                            particulars,
+                            debit,
+                            credit,
+                            balance,
+                            created_at
+                         )
+                         VALUES
+                        (?,?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        mob,
+                        str(voucher_date),
+                        party_name,
+                        "Party",
                         voucher_type,
                         voucher_no,
-                        particulars,
+                        narration,
                         debit,
                         credit,
                         balance,
-                        created_at
-                    )
-                    VALUES
-                    (?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                                mob,
-            str(voucher_date),
-            party_name,
-            "Party",
-            voucher_type,
-            voucher_no,
-            narration,
-            debit,
-            credit,
-            balance,
-            now()
-        ))
+                        now()
+                    ))
 
-        conn.commit()
+                    conn.commit()
 
-    except Exception as e:
-        st.error(f"Ledger Error: {e}")
+                except Exception as e:
+                    st.error(f"Ledger Error: {e}")
 
 
 # ============================================================

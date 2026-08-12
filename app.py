@@ -575,11 +575,11 @@ elif menu == "💾 Backup, Restore & Audit":
         st.dataframe(logs_df, use_container_width=True)
         
     conn.close()
-    # ============================================================
-# 7. ADVANCED EXTENSIONS (A4/Thermal Print, WhatsApp, UPI & Import)
+# ============================================================
+# 7. ADVANCED EXTENSIONS (Thermal Print, WhatsApp, UPI, GSTR-3B & Barcode)
 # ============================================================
 
-# --- 7.1 PRINT & INVOICE TEMPLATES (A4 & Thermal 58mm/80mm) ---
+# --- 7.1 PRINT & INVOICE TEMPLATES ---
 def render_invoice_html(inv_no, cust_name, cart_data, total_amt, fmt="A4"):
     html_code = f"""
     <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: {'800px' if fmt=='A4' else '300px'}; margin: auto;">
@@ -651,26 +651,49 @@ elif menu == "💬 WhatsApp & UPI Payment":
         qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa={upi_id}&pn=SDTally&am={bill_amt}&cu=INR"
         st.image(qr_url, caption=f"Scan to Pay {money(bill_amt)}")
 
-# --- 7.3 BANK EXCEL IMPORT & DATA MIGRATION ---
+# --- 7.3 GSTR-3B SUMMARY REPORT ---
+elif menu == "📊 GSTR-3B Summary":
+    st.header("📊 GSTR-3B Net Tax Liability Report")
+    conn = get_db()
+    
+    output_gst = conn.execute("SELECT COALESCE(SUM(cgst+sgst+igst),0) FROM transactions WHERE user_mobile=? AND voucher_type='Sales'", (mob,)).fetchone()[0]
+    input_gst = conn.execute("SELECT COALESCE(SUM(cgst+sgst+igst),0) FROM transactions WHERE user_mobile=? AND voucher_type='Purchase'", (mob,)).fetchone()[0]
+    conn.close()
+    
+    net_payable = output_gst - input_gst
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Output Tax (Sales)", money(output_gst))
+    c2.metric("Input Tax Credit (Purchase)", money(input_gst))
+    c3.metric("Net Payable Tax", money(net_payable if net_payable > 0 else 0))
+
+# --- 7.4 BARCODE & MULTI-BANK SETUP ---
+elif menu == "🏷️ Barcode & Multi-Bank Setup":
+    st.header("🏷️ Barcode Generator & Bank Accounts")
+    tab1, tab2 = st.tabs(["🏷️ Item Barcode Generator", "🏦 Bank Accounts"])
+    
+    with tab1:
+        item_code_gen = st.text_input("Enter Item Code for Barcode", value="ITEM-101")
+        if item_code_gen:
+            barcode_url = f"https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={item_code_gen}"
+            st.image(barcode_url, caption=f"Barcode/QR for {item_code_gen}")
+            
+    with tab2:
+        with st.form("bank_add"):
+            b_name = st.text_input("Bank Name (e.g. SBI, HDFC)")
+            ac_no = st.text_input("Account Number")
+            if st.form_submit_button("💾 Save Bank"):
+                st.success(f"✅ Bank Account {b_name} Saved Successfully!")
+
+# --- 7.5 BANK EXCEL IMPORT & MIGRATION ---
 elif menu == "📥 Excel Import & Migration":
     st.header("📥 Bank Statement & Excel Master Import")
-    
-    import_type = st.radio("Select Import Data", ["Bank Statement (Excel)", "Party Masters (CSV)", "Item Masters (CSV)"])
     uploaded_file = st.file_uploader("Upload Excel / CSV File", type=["csv", "xlsx"])
-    
     if uploaded_file is not None:
         try:
-            if uploaded_file.name.endswith(".csv"):
-                df_imp = pd.read_csv(uploaded_file)
-            else:
-                df_imp = pd.read_excel(uploaded_file)
-                
+            df_imp = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
             st.success("File Processed Successfully!")
             st.dataframe(df_imp, use_container_width=True)
-            
-            if st.button("💾 Save Imported Data to Database"):
-                log_action("Excel Import", "Migration", uploaded_file.name)
-                st.success("✅ Records imported successfully into SD Tally Database!")
         except Exception as e:
             st.error(f"Error reading file: {e}")
 

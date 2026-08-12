@@ -10223,8 +10223,7 @@ elif menu == "📅 Daily Sales Summary":
                 .fillna(0)
                 .sum()
             )
-                    )
-    # ============================================================
+                    if# ============================================================
 # DAILY PURCHASE SUMMARY
 # ============================================================
 
@@ -10271,6 +10270,7 @@ elif menu == "📅 Daily Purchase Summary":
     conn.close()
 
     if daily_purchase_df.empty:
+if daily_purchase_df.empty:
 
         st.info("No Daily Purchase records available.")
 
@@ -10282,13 +10282,15 @@ elif menu == "📅 Daily Purchase Summary":
             hide_index=True
         )
 
+        total_purchase = (
+            daily_purchase_df["Total"]
+            .fillna(0)
+            .sum()
+        )
+
         st.metric(
             "Total Purchase",
-            money(
-                daily_purchase_df["Total"]
-                .fillna(0)
-                .sum()
-            )
+            money(total_purchase)
         )
 
 

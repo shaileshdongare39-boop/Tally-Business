@@ -11304,56 +11304,60 @@ elif menu == "💰 Customer Outstanding Summary":
             money(total_customer_outstanding)
         )
 # ============================================================
-# SUPPLIER OUTSTANDING
+# CUSTOMER OUTSTANDING SUMMARY
 # ============================================================
 
-elif menu == "💳 Supplier Outstanding":
+elif menu == "💰 Customer Outstanding Summary":
 
-    st.subheader("💳 Supplier Outstanding")
+    st.subheader("💰 Customer Outstanding Summary")
 
     conn = get_db()
 
-    supplier_outstanding_df = pd.read_sql_query(
-        "SELECT account_name AS Supplier, "
-        "COALESCE(SUM(debit), 0) AS Debit, "
-        "COALESCE(SUM(credit), 0) AS Credit, "
-        "(COALESCE(SUM(credit), 0) - "
-        "COALESCE(SUM(debit), 0)) AS Outstanding "
-        "FROM ledger "
-        "WHERE user_mobile=? "
-        "AND account_type='Supplier' "
-        "GROUP BY account_name "
-        "HAVING Outstanding > 0 "
-        "ORDER BY Outstanding DESC",
+    customer_outstanding_df = pd.read_sql_query(
+        """
+        SELECT
+            account_name AS Customer,
+            COALESCE(SUM(debit), 0) AS Debit,
+            COALESCE(SUM(credit), 0) AS Credit,
+            (
+                COALESCE(SUM(debit), 0)
+                - COALESCE(SUM(credit), 0)
+            ) AS Outstanding
+        FROM ledger
+        WHERE user_mobile=?
+        AND account_type='Customer'
+        GROUP BY account_name
+        HAVING Outstanding > 0
+        ORDER BY Outstanding DESC
+        """,
         conn,
         params=(mob,)
     )
 
     conn.close()
 
-    if supplier_outstanding_df.empty:
+    if customer_outstanding_df.empty:
 
-        st.success("No Supplier Outstanding records available.")
+        st.success("No Customer Outstanding records available.")
 
     else:
 
         st.dataframe(
-            supplier_outstanding_df,
+            customer_outstanding_df,
             use_container_width=True,
             hide_index=True
         )
 
-        total_outstanding = (
-            supplier_outstanding_df["Outstanding"]
+        total_customer_outstanding = (
+            customer_outstanding_df["Outstanding"]
             .fillna(0)
             .sum()
         )
 
         st.metric(
-            "Total Supplier Outstanding",
-            money(total_outstanding)
+            "Total Customer Outstanding",
+            money(total_customer_outstanding)
         )
-
 
 # ============================================================
 # CUSTOMER OUTSTANDING SUMMARY

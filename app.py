@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     px = None
 
-# Page Setup & Mobile Styling
+# Page Setup & Mobile Touch Styling
 st.set_page_config(
     page_title="SD TALLY BUSINESS Enterprise",
     layout="wide",
@@ -22,7 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🛠️ MOBILE SCROLLING, TOUCH & A4 PRINT CSS FIX
+# 🛠️ MOBILE SCROLLING & TOUCH CSS FIX
 st.markdown("""
     <style>
     html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp, .main {
@@ -76,8 +76,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Database Initialization Engine
-DB_FILE = "sd_tally_v25_master.db"
+# Database Initialization
+DB_FILE = "sd_tally_v26_master.db"
 
 def get_db():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -201,7 +201,7 @@ if "generated_otp" not in st.session_state:
 if "cart_items" not in st.session_state:
     st.session_state.cart_items = []
 
-# Safe Session Restore via Query Params Link
+# 🔑 PERSISTENT SESSION RESTORE ENGINE (BACK - REFRESH PROTECTION)
 try:
     query_params = st.query_params
     saved_mobile = query_params.get("user_session", None)
@@ -389,6 +389,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 user_mob = st.session_state.user_mobile
+
 # ---------------- MODULE IMPLEMENTATIONS ----------------
 
 # 1. DASHBOARD WITH ANALYTICS

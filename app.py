@@ -11201,20 +11201,26 @@ elif menu == "💳 Supplier Outstanding":
 
     conn = get_db()
 
-    supplier_outstanding_df = pd.read_sql_query("""
+    supplier_outstanding_df = pd.read_sql_query(
+        """
         SELECT
             account_name AS Supplier,
             COALESCE(SUM(debit), 0) AS Debit,
             COALESCE(SUM(credit), 0) AS Credit,
-            COALESCE(SUM(credit), 0)
-                - COALESCE(SUM(debit), 0) AS Outstanding
+            (
+                COALESCE(SUM(credit), 0)
+                - COALESCE(SUM(debit), 0)
+            ) AS Outstanding
         FROM ledger
         WHERE user_mobile=?
         AND account_type='Supplier'
         GROUP BY account_name
         HAVING Outstanding > 0
         ORDER BY Outstanding DESC
-    """, conn, params=(mob,))
+        """,
+        conn,
+        params=(mob,)
+    )
 
     conn.close()
 
@@ -11230,10 +11236,136 @@ elif menu == "💳 Supplier Outstanding":
             hide_index=True
         )
 
+        total_supplier_outstanding = (
+            supplier_outstanding_df["Outstanding"]
+            .fillna(0)
+            .sum()
+        )
+
         st.metric(
             "Total Supplier Outstanding",
+            money(total_supplier_outstanding)
+        )
+
+
+# ============================================================
+# CUSTOMER OUTSTANDING SUMMARY
+# ============================================================
+
+elif menu == "💰 Customer Outstanding Summary":
+
+    st.subheader("💰 Customer Outstanding Summary")
+
+    conn = get_db()
+
+    customer_outstanding_df = pd.read_sql_query(
+        """
+        SELECT
+            account_name AS Customer,
+            COALESCE(SUM(debit), 0) AS Debit,
+            COALESCE(SUM(credit), 0) AS Credit,
+            (
+                COALESCE(SUM(debit), 0)
+                - COALESCE(SUM(credit), 0)
+            ) AS Outstanding
+        FROM ledger
+        WHERE user_mobile=?
+        AND account_type='Customer'
+        GROUP BY account_name
+        HAVING Outstanding > 0
+        ORDER BY Outstanding DESC
+        """,
+        conn,
+        params=(mob,)
+    )
+
+    conn.close()
+
+    if customer_outstanding_df.empty:
+
+        st.success("No Customer Outstanding records available.")
+
+    else:
+
+        st.dataframe(
+            customer_outstanding_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        total_customer_outstanding = (
+            customer_outstanding_df["Outstanding"]
+            .fillna(0)
+            .sum()
+        )
+
+        st.metric(
+            "Total Customer Outstanding",
+            money(total_customer_outstanding)
+        )
+
+
+# ============================================================
+# PARTY LEDGER SUMMARY
+# ============================================================
+
+elif menu == "👥 Party Ledger Summary":
+
+    st.subheader("👥 Party Ledger Summary")
+
+    conn = get_db()
+
+    party_ledger_df = pd.read_sql_query(
+        """
+        SELECT
+            account_name AS Party,
+            account_type AS Account_Type,
+            COALESCE(SUM(debit), 0) AS Debit,
+            COALESCE(SUM(credit), 0) AS Credit,
+            (
+                COALESCE(SUM(debit), 0)
+                - COALESCE(SUM(credit), 0)
+            ) AS Balance
+        FROM ledger
+        WHERE user_mobile=?
+        GROUP BY account_name, account_type
+        ORDER BY account_name
+        """,
+        conn,
+        params=(mob,)
+    )
+
+    conn.close()
+
+    if party_ledger_df.empty:
+
+        st.info("No Party Ledger records available.")
+
+    else:
+
+        st.dataframe(
+            party_ledger_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        c1, c2 = st.columns(2)
+
+        c1.metric(
+            "Total Debit",
             money(
-                supplier_outstanding_df["Outstanding"].sum()
+                party_ledger_df["Debit"]
+                .fillna(0)
+                .sum()
             )
-                ) 
-                
+        )
+
+        c2.metric(
+            "Total Credit",
+            money(
+                party_ledger_df["Credit"]
+                .fillna(0)
+                .sum()
+            )
+    )
+                    

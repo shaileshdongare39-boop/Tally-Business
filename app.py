@@ -77,7 +77,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Database Initialization
-DB_FILE = "sd_tally_v15_master.db"
+DB_FILE = "sd_tally_v16_master.db"
 
 def get_db():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -415,10 +415,10 @@ if menu == "🏠 Dashboard":
     else:
         st.success("All inventory stock levels are optimal.")
 
-# 2. MASTERS WITH EDIT & DELETE
+# 2. MASTERS WITH PARTY EDIT & UNIQUE NAME FIX
 elif menu == "🗂️ Masters (Items, HSN & Parties)":
     st.subheader("⚙️ Masters Configuration & Manage Records")
-    tab1, tab2, tab3 = st.tabs(["📦 Add Stock Item", "👤 Add Party Ledger", "✏️ Edit / Delete Master Records"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📦 Add Stock Item", "👤 Add Party Ledger", "✏️ Edit / Delete Party", "🗑️ Delete Item Master"])
     conn = get_db()
     c = conn.cursor()
     
@@ -449,16 +449,49 @@ elif menu == "🗂️ Masters (Items, HSN & Parties)":
         p_mobile = st.text_input("Mobile Number")
         p_gstin = st.text_input("GSTIN Number")
         p_type = st.selectbox("Party Classification", ["Customer", "Supplier"])
+        op_bal = st.number_input("Opening Balance (₹)", min_value=0.0)
         
         if st.button("Save Ledger Master"):
             if p_name:
-                c.execute("INSERT INTO parties (user_mobile, party_name, gstin, mobile, party_type, opening_balance) VALUES (?, ?, ?, ?, ?, ?)",
-                          (user_mob, p_name, p_gstin, p_mobile, p_type, 0.0))
-                conn.commit()
-                st.success("Party Ledger Created!")
+                c.execute("SELECT id FROM parties WHERE party_name=? AND user_mobile=?", (p_name, user_mob))
+                if c.fetchone():
+                    st.error("❌ Party Name already exists!")
+                else:
+                    c.execute("INSERT INTO parties (user_mobile, party_name, gstin, mobile, party_type, opening_balance) VALUES (?, ?, ?, ?, ?, ?)",
+                              (user_mob, p_name, p_gstin, p_mobile, p_type, op_bal))
+                    conn.commit()
+                    st.success("✅ Party Ledger Created!")
 
     with tab3:
-        st.subheader("🗑️ Delete / Modify Existing Inventory Items")
+        st.subheader("✏️ Manage & Edit Registered Parties")
+        parties_df = pd.read_sql_query("SELECT id, party_name, mobile, gstin, party_type, opening_balance FROM parties WHERE user_mobile=?", conn, params=(user_mob,))
+        st.dataframe(parties_df, use_container_width=True)
+        
+        if not parties_df.empty:
+            sel_party_id = st.selectbox("Select Party to Edit / Update", parties_df['id'].tolist())
+            party_info = parties_df[parties_df['id'] == sel_party_id].iloc[0]
+            
+            ep_name = st.text_input("Edit Party Name", value=party_info['party_name'])
+            ep_mobile = st.text_input("Edit Mobile Number", value=str(party_info['mobile']))
+            ep_gstin = st.text_input("Edit GSTIN", value=str(party_info['gstin']))
+            ep_bal = st.number_input("Edit Opening Balance (₹)", value=float(party_info['opening_balance']))
+            
+            col_u, col_d = st.columns(2)
+            if col_u.button("💾 Update Party Profile"):
+                c.execute("UPDATE parties SET party_name=?, mobile=?, gstin=?, opening_balance=? WHERE id=? AND user_mobile=?",
+                          (ep_name, ep_mobile, ep_gstin, ep_bal, sel_party_id, user_mob))
+                conn.commit()
+                st.success("✅ Party Information Updated!")
+                st.rerun()
+                
+            if col_d.button("🗑️ Delete Party Account"):
+                c.execute("DELETE FROM parties WHERE id=? AND user_mobile=?", (sel_party_id, user_mob))
+                conn.commit()
+                st.success("✅ Party Deleted!")
+                st.rerun()
+
+    with tab4:
+        st.subheader("🗑️ Delete Existing Inventory Items")
         items_df = pd.read_sql_query("SELECT id, item_name, sale_price, purchase_price, stock_qty FROM inventory WHERE user_mobile=?", conn, params=(user_mob,))
         st.dataframe(items_df, use_container_width=True)
         
@@ -478,8 +511,8 @@ elif menu == "🛒 Purchase Entry":
     c = conn.cursor()
     
     with tab1:
-        parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE party_type='Supplier' AND user_mobile=?", (user_mob,)).fetchall()]
-        items_list = [row[0] for row in c.execute("SELECT item_name FROM inventory WHERE user_mobile=?", (user_mob,)).fetchall()]
+        parties_list = [row[0] for row in c.execute("SELECT DISTINCT party_name FROM parties WHERE party_type='Supplier' AND user_mobile=?", (user_mob,)).fetchall()]
+        items_list = [row[0] for row in c.execute("SELECT DISTINCT item_name FROM inventory WHERE user_mobile=?", (user_mob,)).fetchall()]
         
         c1, c2, c3 = st.columns(3)
         v_no = c1.text_input("Purchase Bill No", f"PUR-{random.randint(1000,9999)}")
@@ -534,7 +567,7 @@ elif menu == "📥 Purchase & GSTR-2B Import":
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-# 5. MULTI-ITEM TAX INVOICE WITH PRINT FIX
+# 5. MULTI-ITEM TAX INVOICE WITH UNIQUE PARTY DROPDOWN
 elif menu == "🧾 Tax Invoice (Sales)":
     st.subheader("🧾 Create Multi-Item Tax Invoice & Printable Bills")
     tab1, tab2 = st.tabs(["📝 New Sales Invoice", "✏️ Manage / Edit / Print Saved Invoices"])
@@ -542,8 +575,8 @@ elif menu == "🧾 Tax Invoice (Sales)":
     c = conn.cursor()
     
     with tab1:
-        parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
-        items_list = [row[0] for row in c.execute("SELECT item_name FROM inventory WHERE user_mobile=?", (user_mob,)).fetchall()]
+        parties_list = [row[0] for row in c.execute("SELECT DISTINCT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
+        items_list = [row[0] for row in c.execute("SELECT DISTINCT item_name FROM inventory WHERE user_mobile=?", (user_mob,)).fetchall()]
         
         c1, c2, c3 = st.columns(3)
         v_no = c1.text_input("Invoice Number", f"INV-{random.randint(1000,9999)}")
@@ -670,7 +703,7 @@ elif menu == "📦 Barcode Quick Billing":
         else:
             st.error("Barcode ID not found.")
 
-# 7. THERMAL RECEIPT PRINT (100% PERFECT POS RENDER FIX)
+# 7. THERMAL RECEIPT PRINT (PROPER RENDER)
 elif menu == "🖨️ Thermal Receipt Print":
     st.subheader("🖨️ POS Thermal Printer Receipt Generator")
     conn = get_db()
@@ -685,7 +718,6 @@ elif menu == "🖨️ Thermal Receipt Print":
         items_tr = "".join([f"<tr><td style='padding:3px;'>{r['item_name']}</td><td style='padding:3px;'>{r['qty']}</td><td style='padding:3px;'>{r['rate']}</td><td style='padding:3px;'>{r['total_amt']:.2f}</td></tr>" for _, r in items_df.iterrows()])
         eway_str = f"<p style='margin:2px 0;'><b>e-Way Bill:</b> {v_meta['eway_bill_no']}</p>" if v_meta['eway_bill_no'] else ""
         
-        # Isolated Pure Component Render (Prevents Raw Code Display)
         html_receipt = f"""
         <div style="background:#ffffff; color:#000; padding:15px; border:1px dashed #000; font-family:'Courier New', monospace; width:280px; margin:auto; border-radius:4px;">
             <center>
@@ -721,8 +753,8 @@ elif menu == "💰 All Tally Vouchers (F4-F9)":
     conn = get_db()
     c = conn.cursor()
     
-    parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
-    banks_list = [row[0] for row in c.execute("SELECT bank_name FROM bank_accounts WHERE user_mobile=?", (user_mob,)).fetchall()]
+    parties_list = [row[0] for row in c.execute("SELECT DISTINCT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
+    banks_list = [row[0] for row in c.execute("SELECT DISTINCT bank_name FROM bank_accounts WHERE user_mobile=?", (user_mob,)).fetchall()]
     all_accs = ["Cash"] + banks_list + parties_list
     
     with tab1:
@@ -807,7 +839,7 @@ elif menu == "🏦 Capital & Bank Account Management":
         st.dataframe(banks_df, use_container_width=True)
 
     with tab3:
-        banks_list = [row[0] for row in c.execute("SELECT bank_name FROM bank_accounts WHERE user_mobile=?", (user_mob,)).fetchall()]
+        banks_list = [row[0] for row in c.execute("SELECT DISTINCT bank_name FROM bank_accounts WHERE user_mobile=?", (user_mob,)).fetchall()]
         if banks_list:
             sel_bank = st.selectbox("Select Bank Account", banks_list)
             bank_amt = st.number_input("Txn Amount (₹)", min_value=1.0)
@@ -838,7 +870,7 @@ elif menu == "👥 Receivables & Party Statements":
     conn = get_db()
     c = conn.cursor()
     
-    parties_list = [row[0] for row in c.execute("SELECT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
+    parties_list = [row[0] for row in c.execute("SELECT DISTINCT party_name FROM parties WHERE user_mobile=?", (user_mob,)).fetchall()]
     
     with tab1:
         if parties_list:

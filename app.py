@@ -11272,7 +11272,7 @@ elif menu == "💰 Customer Outstanding Summary":
         WHERE user_mobile=?
         AND account_type='Customer'
         GROUP BY account_name
-        HAVING Outstanding > 0
+        HAVING Outstanding >= 0
         ORDER BY Outstanding DESC
         """,
         conn,
@@ -11303,4 +11303,3 @@ elif menu == "💰 Customer Outstanding Summary":
             "Total Customer Outstanding",
             money(total_customer_outstanding)
         )
-

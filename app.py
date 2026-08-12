@@ -1,11 +1,8 @@
 import streamlit as st
 import sqlite3
 import io
-import zipfile
 import hashlib
 import secrets
-import json
-import os
 from datetime import date, datetime, timedelta
 
 try:
@@ -32,11 +29,11 @@ except ImportError:
 # ============================================================
 # SD TALLY BUSINESS
 # PROFESSIONAL ALL-IN-ONE ERP
-# PART 1
+# CORRECTED PART 1
 # ============================================================
 
 APP_NAME = "SD TALLY BUSINESS"
-APP_VERSION = "4.0.0"
+APP_VERSION = "4.0.1"
 DB_FILE = "sd_tally_business_enterprise.db"
 
 
@@ -49,7 +46,7 @@ st.set_page_config(
 
 
 # ============================================================
-# GLOBAL STYLE
+# STYLE
 # ============================================================
 
 st.markdown(
@@ -126,7 +123,7 @@ st.markdown(
 
 
 # ============================================================
-# DATABASE CONNECTION
+# DATABASE
 # ============================================================
 
 def db():
@@ -137,20 +134,20 @@ def db():
 
 
 def q(sql, params=()):
+    if pd is None:
+        raise RuntimeError(
+            "pandas is required. "
+            "Install using: pip install pandas"
+        )
+
     con = db()
 
     try:
-        if pd is None:
-            raise RuntimeError(
-                "pandas is required. Install using: pip install pandas"
-            )
-
         return pd.read_sql_query(
             sql,
             con,
             params=params
         )
-
     finally:
         con.close()
 
@@ -163,7 +160,6 @@ def exec_sql(sql, params=()):
         cur.execute(sql, params)
         con.commit()
         return cur.lastrowid
-
     finally:
         con.close()
 
@@ -175,9 +171,39 @@ def exec_many(sql, rows):
         cur = con.cursor()
         cur.executemany(sql, rows)
         con.commit()
-
     finally:
         con.close()
+
+
+# ============================================================
+# SAFE DATABASE MIGRATION
+# ============================================================
+
+def add_column_if_missing(
+    con,
+    table,
+    column,
+    definition
+):
+    cur = con.cursor()
+
+    cur.execute(
+        f"PRAGMA table_info({table})"
+    )
+
+    columns = [
+        row[1]
+        for row in cur.fetchall()
+    ]
+
+    if column not in columns:
+
+        cur.execute(
+            f"""
+            ALTER TABLE {table}
+            ADD COLUMN {column} {definition}
+            """
+        )
 
 
 # ============================================================
@@ -189,8 +215,11 @@ def init_db():
     con = db()
     c = con.cursor()
 
-    tables = [
+    # --------------------------------------------------------
+    # USERS
+    # --------------------------------------------------------
 
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS users(
             mobile TEXT PRIMARY KEY,
@@ -207,8 +236,40 @@ def init_db():
             pin_hash TEXT,
             active INTEGER DEFAULT 1
         )
-        """,
+        """
+    )
 
+    # Old DB compatibility
+    user_columns = [
+        ("name", "TEXT"),
+        ("business_name", "TEXT"),
+        ("business_address", "TEXT"),
+        ("gstin", "TEXT"),
+        ("state_code", "TEXT"),
+        ("reg_date", "TEXT"),
+        ("trial_end_date", "TEXT"),
+        ("is_paid", "INTEGER DEFAULT 0"),
+        ("paid_till", "TEXT"),
+        ("role", "TEXT DEFAULT 'Owner'"),
+        ("pin_hash", "TEXT"),
+        ("active", "INTEGER DEFAULT 1")
+    ]
+
+    for column, definition in user_columns:
+
+        add_column_if_missing(
+            con,
+            "users",
+            column,
+            definition
+        )
+
+
+    # --------------------------------------------------------
+    # SETTINGS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS settings(
             user_mobile TEXT PRIMARY KEY,
@@ -220,8 +281,15 @@ def init_db():
             invoice_terms TEXT,
             currency TEXT DEFAULT 'INR'
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # ACCOUNTS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS accounts(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,8 +302,15 @@ def init_db():
             active INTEGER DEFAULT 1,
             UNIQUE(user_mobile, name)
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # PARTIES
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS parties(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,8 +327,15 @@ def init_db():
             credit_days INTEGER DEFAULT 0,
             active INTEGER DEFAULT 1
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # GODOWNS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS godowns(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -263,8 +345,15 @@ def init_db():
             active INTEGER DEFAULT 1,
             UNIQUE(user_mobile, godown_name)
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # ITEMS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS items(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -285,8 +374,15 @@ def init_db():
             active INTEGER DEFAULT 1,
             UNIQUE(user_mobile, item_name)
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # VOUCHERS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS vouchers(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -309,8 +405,15 @@ def init_db():
             status TEXT DEFAULT 'Posted',
             created_at TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # VOUCHER ITEMS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS voucher_items(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -332,8 +435,15 @@ def init_db():
             batch_no TEXT,
             expiry_date TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # JOURNAL
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS journal(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -347,8 +457,15 @@ def init_db():
             credit REAL DEFAULT 0,
             narration TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # STOCK
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS stock_moves(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -366,8 +483,15 @@ def init_db():
             rate REAL DEFAULT 0,
             reference_no TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # RECEIPTS / PAYMENTS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS receipts_payments(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -383,8 +507,15 @@ def init_db():
             reference TEXT,
             narration TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # ALLOCATIONS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS allocations(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -393,8 +524,15 @@ def init_db():
             invoice_id INTEGER,
             amount REAL
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # EXPENSES
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS expenses(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -405,8 +543,15 @@ def init_db():
             amount REAL,
             mode TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # RETURNS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS returns(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -423,8 +568,15 @@ def init_db():
             total REAL,
             reason TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # BANK ACCOUNTS
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS bank_accounts(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -436,8 +588,15 @@ def init_db():
             opening_balance REAL DEFAULT 0,
             active INTEGER DEFAULT 1
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # BANK STATEMENT
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS bank_statement(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -451,8 +610,15 @@ def init_db():
             reconciled INTEGER DEFAULT 0,
             imported_file TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # AUDIT LOG
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS audit_log(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -463,8 +629,15 @@ def init_db():
             record_id INTEGER,
             details TEXT
         )
-        """,
+        """
+    )
 
+
+    # --------------------------------------------------------
+    # BRANDING
+    # --------------------------------------------------------
+
+    c.execute(
         """
         CREATE TABLE IF NOT EXISTS branding(
             user_mobile TEXT PRIMARY KEY,
@@ -473,10 +646,8 @@ def init_db():
             bank_details TEXT
         )
         """
-    ]
+    )
 
-    for table_sql in tables:
-        c.execute(table_sql)
 
     con.commit()
     con.close()
@@ -486,7 +657,7 @@ init_db()
 
 
 # ============================================================
-# GENERAL HELPERS
+# HELPERS
 # ============================================================
 
 def now():
@@ -520,7 +691,9 @@ def current_user():
 
 def user_row():
 
-    if not current_user():
+    mobile = current_user()
+
+    if not mobile:
         return None
 
     data = q(
@@ -529,8 +702,9 @@ def user_row():
         FROM users
         WHERE mobile=?
         AND active=1
+        LIMIT 1
         """,
-        (current_user(),)
+        (mobile,)
     )
 
     if data.empty:
@@ -541,7 +715,9 @@ def user_row():
 
 def settings_row():
 
-    if not current_user():
+    mobile = current_user()
+
+    if not mobile:
         return {}
 
     data = q(
@@ -549,8 +725,9 @@ def settings_row():
         SELECT *
         FROM settings
         WHERE user_mobile=?
+        LIMIT 1
         """,
-        (current_user(),)
+        (mobile,)
     )
 
     if data.empty:
@@ -566,7 +743,9 @@ def log(
     details=""
 ):
 
-    if not current_user():
+    mobile = current_user()
+
+    if not mobile:
         return
 
     exec_sql(
@@ -582,7 +761,7 @@ def log(
         VALUES(?,?,?,?,?,?)
         """,
         (
-            current_user(),
+            mobile,
             now(),
             action,
             entity,
@@ -610,78 +789,30 @@ def fy_for(date_string):
 
 
 # ============================================================
-# ACCOUNT MASTER
+# DEFAULT ACCOUNTS
 # ============================================================
 
 def ensure_accounts():
 
+    if not current_user():
+        return
+
     defaults = [
 
-        (
-            "Cash",
-            "Cash",
-            "Asset"
-        ),
+        ("Cash", "Cash", "Asset"),
+        ("Bank", "Bank", "Asset"),
+        ("Sales", "Sales", "Income"),
+        ("Purchase", "Purchase", "Expense"),
 
-        (
-            "Bank",
-            "Bank",
-            "Asset"
-        ),
+        ("CGST Output", "GST", "Liability"),
+        ("SGST Output", "GST", "Liability"),
+        ("IGST Output", "GST", "Liability"),
 
-        (
-            "Sales",
-            "Sales",
-            "Income"
-        ),
+        ("CGST Input", "GST", "Asset"),
+        ("SGST Input", "GST", "Asset"),
+        ("IGST Input", "GST", "Asset"),
 
-        (
-            "Purchase",
-            "Purchase",
-            "Expense"
-        ),
-
-        (
-            "CGST Output",
-            "GST",
-            "Liability"
-        ),
-
-        (
-            "SGST Output",
-            "GST",
-            "Liability"
-        ),
-
-        (
-            "IGST Output",
-            "GST",
-            "Liability"
-        ),
-
-        (
-            "CGST Input",
-            "GST",
-            "Asset"
-        ),
-
-        (
-            "SGST Input",
-            "GST",
-            "Asset"
-        ),
-
-        (
-            "IGST Input",
-            "GST",
-            "Asset"
-        ),
-
-        (
-            "Capital",
-            "Capital",
-            "Equity"
-        ),
+        ("Capital", "Capital", "Equity"),
 
         (
             "Discount Allowed",
@@ -735,588 +866,8 @@ def ensure_accounts():
         )
 
 
-def account_names():
-
-    data = q(
-        """
-        SELECT name
-        FROM accounts
-        WHERE user_mobile=?
-        AND active=1
-        ORDER BY name
-        """,
-        (current_user(),)
-    )
-
-    if data.empty:
-        return []
-
-    return data["name"].tolist()
-
-
 # ============================================================
-# PARTY / ITEM HELPERS
-# ============================================================
-
-def party_options(party_type=None):
-
-    if party_type:
-
-        return q(
-            """
-            SELECT id, party_name
-            FROM parties
-            WHERE user_mobile=?
-            AND party_type IN (?, 'Both')
-            AND active=1
-            ORDER BY party_name
-            """,
-            (
-                current_user(),
-                party_type
-            )
-        )
-
-    return q(
-        """
-        SELECT id, party_name
-        FROM parties
-        WHERE user_mobile=?
-        AND active=1
-        ORDER BY party_name
-        """,
-        (current_user(),)
-    )
-
-
-def item_options():
-
-    return q(
-        """
-        SELECT *
-        FROM items
-        WHERE user_mobile=?
-        AND active=1
-        ORDER BY item_name
-        """,
-        (current_user(),)
-    )
-
-
-# ============================================================
-# VOUCHER NUMBER
-# ============================================================
-
-def next_no(kind):
-
-    settings = settings_row()
-
-    if kind == "Sales":
-        prefix = settings.get(
-            "invoice_prefix",
-            "INV"
-        )
-    else:
-        prefix = settings.get(
-            "purchase_prefix",
-            "PUR"
-        )
-
-    fy = fy_for(today())
-
-    data = q(
-        """
-        SELECT voucher_no
-        FROM vouchers
-        WHERE user_mobile=?
-        AND voucher_type=?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (
-            current_user(),
-            kind
-        )
-    )
-
-    number = 1
-
-    if not data.empty:
-
-        value = str(
-            data.iloc[0]["voucher_no"]
-        )
-
-        try:
-            number = (
-                int(
-                    value.split("-")[-1]
-                ) + 1
-            )
-        except Exception:
-            number = 1
-
-    return (
-        f"{prefix}-{fy}-{number:05d}"
-    )
-
-
-# ============================================================
-# GST CALCULATION
-# ============================================================
-
-def gst_split(
-    taxable,
-    gst_rate,
-    same_state=True
-):
-
-    taxable = float(taxable or 0)
-    gst_rate = float(gst_rate or 0)
-
-    tax = round(
-        taxable * gst_rate / 100,
-        2
-    )
-
-    if same_state:
-        half = round(
-            tax / 2,
-            2
-        )
-
-        return (
-            half,
-            round(tax - half, 2),
-            0.0
-        )
-
-    return (
-        0.0,
-        0.0,
-        tax
-    )
-
-
-# ============================================================
-# STOCK BALANCE
-# ============================================================
-
-def stock_balance(
-    item_id,
-    godown=None
-):
-
-    params = [
-        current_user(),
-        item_id
-    ]
-
-    sql = """
-        SELECT
-            COALESCE(
-                SUM(qty_in - qty_out),
-                0
-            ) AS qty
-        FROM stock_moves
-        WHERE user_mobile=?
-        AND item_id=?
-    """
-
-    if godown:
-
-        sql += """
-            AND godown=?
-        """
-
-        params.append(godown)
-
-    data = q(
-        sql,
-        tuple(params)
-    )
-
-    if data.empty:
-        return 0.0
-
-    return float(
-        data.iloc[0]["qty"] or 0
-    )
-
-
-# ============================================================
-# STOCK MOVEMENT
-# ============================================================
-
-def add_stock(
-    voucher_id,
-    vdate,
-    item_id,
-    item_name,
-    godown,
-    qty_in,
-    qty_out,
-    rate,
-    move_type,
-    batch="",
-    expiry="",
-    ref=""
-):
-
-    return exec_sql(
-        """
-        INSERT INTO stock_moves(
-            user_mobile,
-            vdate,
-            voucher_id,
-            item_id,
-            item_name,
-            godown,
-            batch_no,
-            expiry_date,
-            move_type,
-            qty_in,
-            qty_out,
-            rate,
-            reference_no
-        )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """,
-        (
-            current_user(),
-            vdate,
-            voucher_id,
-            item_id,
-            item_name,
-            godown,
-            batch,
-            expiry,
-            move_type,
-            qty_in,
-            qty_out,
-            rate,
-            ref
-        )
-    )
-
-
-# ============================================================
-# JOURNAL POSTING
-# ============================================================
-
-def post_journal(
-    voucher_id,
-    voucher_type,
-    voucher_no,
-    vdate,
-    entries,
-    narration=""
-):
-
-    """
-    entries format:
-
-    [
-        ("Account", debit, credit),
-        ("Account", debit, credit)
-    ]
-    """
-
-    total_debit = 0.0
-    total_credit = 0.0
-
-    for account, debit, credit in entries:
-
-        debit = float(debit or 0)
-        credit = float(credit or 0)
-
-        total_debit += debit
-        total_credit += credit
-
-        exec_sql(
-            """
-            INSERT INTO journal(
-                user_mobile,
-                voucher_id,
-                vdate,
-                voucher_type,
-                voucher_no,
-                account_name,
-                debit,
-                credit,
-                narration
-            )
-            VALUES(?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                current_user(),
-                voucher_id,
-                vdate,
-                voucher_type,
-                voucher_no,
-                account,
-                debit,
-                credit,
-                narration
-            )
-        )
-
-    # Accounting integrity check
-    if round(total_debit, 2) != round(
-        total_credit,
-        2
-    ):
-
-        raise ValueError(
-            "Journal is not balanced. "
-            f"Debit={total_debit:.2f}, "
-            f"Credit={total_credit:.2f}"
-        )
-
-    log(
-        "POST",
-        "journal",
-        voucher_id,
-        f"{voucher_type} {voucher_no}"
-    )
-
-
-# ============================================================
-# PDF INVOICE
-# ============================================================
-
-def invoice_pdf(voucher_id):
-
-    if not REPORTLAB_OK:
-        return None
-
-    header = q(
-        """
-        SELECT *
-        FROM vouchers
-        WHERE id=?
-        AND user_mobile=?
-        """,
-        (
-            voucher_id,
-            current_user()
-        )
-    )
-
-    if header.empty:
-        return None
-
-    items = q(
-        """
-        SELECT *
-        FROM voucher_items
-        WHERE voucher_id=?
-        ORDER BY id
-        """,
-        (voucher_id,)
-    )
-
-    row = header.iloc[0]
-    user = user_row()
-
-    bio = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        bio,
-        pagesize=A4,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30
-    )
-
-    styles = getSampleStyleSheet()
-
-    story = []
-
-    story.append(
-        Paragraph(
-            f"<b>{user.get('business_name','')}</b>",
-            styles["Title"]
-        )
-    )
-
-    story.append(
-        Paragraph(
-            f"{user.get('business_address','')}"
-            f"<br/>GSTIN: {user.get('gstin','')}",
-            styles["Normal"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 10)
-    )
-
-    story.append(
-        Paragraph(
-            f"<b>Tax Invoice</b> "
-            f"#{row['voucher_no']} "
-            f"| Date: {row['vdate']}",
-            styles["Heading2"]
-        )
-    )
-
-    story.append(
-        Paragraph(
-            f"Party: {row['party_name']}",
-            styles["Normal"]
-        )
-    )
-
-    story.append(
-        Spacer(1, 10)
-    )
-
-    table_data = [
-        [
-            "Item",
-            "HSN",
-            "Qty",
-            "Rate",
-            "Disc",
-            "Taxable",
-            "GST",
-            "Total"
-        ]
-    ]
-
-    for _, item in items.iterrows():
-
-        table_data.append(
-            [
-                item["item_name"],
-                item["hsn_sac"],
-                item["qty"],
-                item["rate"],
-                item["discount"],
-                item["taxable"],
-                (
-                    item["cgst"]
-                    + item["sgst"]
-                    + item["igst"]
-                ),
-                item["total"]
-            ]
-        )
-
-    table_data.extend(
-        [
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "Taxable",
-                row["taxable"],
-                ""
-            ],
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "CGST",
-                row["cgst"],
-                ""
-            ],
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "SGST",
-                row["sgst"],
-                ""
-            ],
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "IGST",
-                row["igst"],
-                ""
-            ],
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "Grand Total",
-                row["total"],
-                ""
-            ]
-        ]
-    )
-
-    table = Table(
-        table_data,
-        repeatRows=1
-    )
-
-    table.setStyle(
-        TableStyle(
-            [
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.grey
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    colors.lightgrey
-                ),
-                (
-                    "ALIGN",
-                    (2, 1),
-                    (-1, -1),
-                    "RIGHT"
-                )
-            ]
-        )
-    )
-
-    story.append(table)
-
-    story.append(
-        Spacer(1, 12)
-    )
-
-    terms = settings_row().get(
-        "invoice_terms",
-        ""
-    )
-
-    if terms:
-        story.append(
-            Paragraph(
-                terms,
-                styles["Normal"]
-            )
-        )
-
-    doc.build(story)
-
-    return bio.getvalue()
-
-
-# ============================================================
-# SESSION STATE
+# SESSION
 # ============================================================
 
 if "user_mobile" not in st.session_state:
@@ -1336,7 +887,7 @@ if "pur_rows" not in st.session_state:
 
 
 # ============================================================
-# LOGIN SCREEN
+# LOGIN
 # ============================================================
 
 if not current_user():
@@ -1401,6 +952,7 @@ if not current_user():
                     SELECT mobile
                     FROM users
                     WHERE mobile=?
+                    LIMIT 1
                     """,
                     (mobile,)
                 )
@@ -1416,9 +968,11 @@ if not current_user():
                             name,
                             reg_date,
                             trial_end_date,
-                            role
+                            is_paid,
+                            role,
+                            active
                         )
-                        VALUES(?,?,?,?,?)
+                        VALUES(?,?,?,?,?,?,?)
                         """,
                         (
                             mobile,
@@ -1428,11 +982,83 @@ if not current_user():
                                 start
                                 + timedelta(days=10)
                             ),
-                            "Owner"
+                            0,
+                            "Owner",
+                            1
                         )
                     )
 
+                else:
+
+                    # Existing old user record
+                    # missing values safely repaired.
+
+                    exec_sql(
+                        """
+                        UPDATE users
+                        SET active=COALESCE(active,1),
+                            role=COALESCE(role,'Owner'),
+                            name=COALESCE(
+                                NULLIF(name,''),
+                                'Business User'
+                            ),
+                            reg_date=COALESCE(
+                                reg_date,
+                                ?
+                            ),
+                            trial_end_date=COALESCE(
+                                trial_end_date,
+                                ?
+                            ),
+                            is_paid=COALESCE(
+                                is_paid,
+                                0
+                            )
+                        WHERE mobile=?
+                        """,
+                        (
+                            str(date.today()),
+                            str(
+                                date.today()
+                                + timedelta(days=10)
+                            ),
+                            mobile
+                        )
+                    )
+
+                exec_sql(
+                    """
+                    INSERT OR IGNORE INTO settings(
+                        user_mobile,
+                        financial_year,
+                        invoice_prefix,
+                        purchase_prefix,
+                        default_gst,
+                        company_state_code,
+                        invoice_terms,
+                        currency
+                    )
+                    VALUES(?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        mobile,
+                        fy_for(today()),
+                        "INV",
+                        "PUR",
+                        18,
+                        "",
+                        "",
+                        "INR"
+                    )
+                )
+
                 ensure_accounts()
+
+                st.session_state.otp = None
+
+                st.success(
+                    "Login successful."
+                )
 
                 st.rerun()
 
@@ -1446,7 +1072,7 @@ if not current_user():
 
 
 # ============================================================
-# USER VALIDATION
+# USER CHECK
 # ============================================================
 
 user = user_row()
@@ -1454,11 +1080,54 @@ user = user_row()
 if not user:
 
     st.session_state.user_mobile = None
+    st.session_state.otp = None
+
+    st.error(
+        "User session could not be loaded. "
+        "Please login again."
+    )
+
     st.rerun()
 
 
 # ============================================================
-# BUSINESS PROFILE SETUP
+# SETTINGS ENSURE
+# ============================================================
+
+if not settings_row():
+
+    exec_sql(
+        """
+        INSERT OR IGNORE INTO settings(
+            user_mobile,
+            financial_year,
+            invoice_prefix,
+            purchase_prefix,
+            default_gst,
+            company_state_code,
+            invoice_terms,
+            currency
+        )
+        VALUES(?,?,?,?,?,?,?,?)
+        """,
+        (
+            current_user(),
+            fy_for(today()),
+            "INV",
+            "PUR",
+            18,
+            user.get("state_code") or "",
+            "",
+            "INR"
+        )
+    )
+
+
+ensure_accounts()
+
+
+# ============================================================
+# BUSINESS PROFILE
 # ============================================================
 
 if not user.get("business_name"):
@@ -1529,23 +1198,15 @@ if not user.get("business_name"):
 
                 exec_sql(
                     """
-                    INSERT OR IGNORE INTO settings(
-                        user_mobile,
-                        financial_year,
-                        company_state_code,
-                        invoice_terms
-                    )
-                    VALUES(?,?,?,?)
+                    UPDATE settings
+                    SET company_state_code=?
+                    WHERE user_mobile=?
                     """,
                     (
-                        current_user(),
-                        fy_for(today()),
                         state_code.strip(),
-                        "Goods once sold are subject to business return policy."
+                        current_user()
                     )
                 )
-
-                ensure_accounts()
 
                 st.success(
                     "Business setup completed."
@@ -1564,29 +1225,46 @@ expired = False
 
 try:
 
-    trial_expired = (
-        not user["is_paid"]
-        and date.today()
-        > datetime.strptime(
-            user["trial_end_date"],
-            "%Y-%m-%d"
-        ).date()
+    trial_date = user.get(
+        "trial_end_date"
     )
 
-    paid_expired = (
-        user["is_paid"]
-        and user["paid_till"]
-        and date.today()
-        > datetime.strptime(
-            user["paid_till"],
-            "%Y-%m-%d"
-        ).date()
+    paid_date = user.get(
+        "paid_till"
     )
 
-    expired = (
-        trial_expired
-        or paid_expired
+    is_paid = int(
+        user.get(
+            "is_paid",
+            0
+        ) or 0
     )
+
+    if not is_paid and trial_date:
+
+        trial_expired = (
+            date.today()
+            >
+            datetime.strptime(
+                str(trial_date),
+                "%Y-%m-%d"
+            ).date()
+        )
+
+        expired = trial_expired
+
+    elif is_paid and paid_date:
+
+        paid_expired = (
+            date.today()
+            >
+            datetime.strptime(
+                str(paid_date),
+                "%Y-%m-%d"
+            ).date()
+        )
+
+        expired = paid_expired
 
 except Exception:
 
@@ -1603,12 +1281,5 @@ if expired:
 
 
 # ============================================================
-# MAKE SURE DEFAULT ACCOUNTS EXIST
-# ============================================================
-
-ensure_accounts()
-
-
-# ============================================================
-# PART 1 END
+# PART 1 COMPLETE
 # ============================================================

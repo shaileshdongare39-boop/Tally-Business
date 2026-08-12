@@ -1,563 +1,1614 @@
 import streamlit as st
-import pandas as pd
 import sqlite3
-import random
 import io
+import zipfile
+import hashlib
+import secrets
 import json
-import base64
-import urllib.parse
-from datetime import datetime, timedelta
-import streamlit.components.v1 as components
+import os
+from datetime import date, datetime, timedelta
 
 try:
-    import plotly.express as px
-except ModuleNotFoundError:
-    px = None
+    import pandas as pd
+except ImportError:
+    pd = None
 
-# Page Setup & Mobile Styling
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle
+    )
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    REPORTLAB_OK = True
+except ImportError:
+    REPORTLAB_OK = False
+
+
+# ============================================================
+# SD TALLY BUSINESS
+# PROFESSIONAL ALL-IN-ONE ERP
+# PART 1
+# ============================================================
+
+APP_NAME = "SD TALLY BUSINESS"
+APP_VERSION = "4.0.0"
+DB_FILE = "sd_tally_business_enterprise.db"
+
+
 st.set_page_config(
-    page_title="SD TALLY BUSINESS Enterprise",
-    layout="wide",
+    page_title=APP_NAME,
     page_icon="🏢",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 🛠️ SMOOTH TOUCH SCROLLING & CSS FIX
-st.markdown("""
+
+# ============================================================
+# GLOBAL STYLE
+# ============================================================
+
+st.markdown(
+    """
     <style>
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp, .main, [data-testid="stSidebar"] {
-        overflow-y: auto !important;
-        -webkit-overflow-scrolling: touch !important;
-        touch-action: pan-y !important;
+    .stApp {
+        background: #f8fafc;
     }
-    .stApp { background-color: #f8fafc; color: #0f172a; }
-    
+
     [data-testid="stSidebar"] {
-        background-color: #ffffff !important;
-        border-right: 1px solid #e2e8f0;
+        background: #ffffff;
     }
-    [data-testid="stSidebar"] *, [data-testid="stSidebar"] label, [data-testid="stSidebar"] span {
-        color: #0f172a !important;
-        font-weight: 600 !important;
-        font-size: 0.95rem !important;
-    }
-    
+
     .main-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        color: #ffffff; padding: 22px; border-radius: 12px; margin-bottom: 25px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .main-header h1 { color: #38bdf8 !important; font-size: 2.1rem; font-weight: 700; margin: 0; }
-    .main-header p { color: #94a3b8 !important; font-size: 0.95rem; margin-top: 4px; margin-bottom: 0; }
-
-    .user-card {
-        background-color: #f1f5f9; padding: 12px 15px; border-radius: 8px;
-        border-left: 4px solid #0284c7; margin-bottom: 10px;
-    }
-    .plan-card {
-        background-color: #e0f2fe; padding: 12px 15px; border-radius: 8px;
-        color: #0369a1 !important; margin-bottom: 20px;
+        background: linear-gradient(
+            135deg,
+            #0f172a,
+            #1e293b
+        );
+        padding: 22px;
+        border-radius: 14px;
+        color: white;
+        margin-bottom: 20px;
     }
 
-    [data-testid="stMetric"] {
-        background-color: #ffffff !important; padding: 18px !important; border-radius: 10px !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.08) !important; border-left: 5px solid #0284c7 !important;
-        border: 1px solid #cbd5e1 !important;
+    .main-header h1 {
+        margin: 0;
+        color: #38bdf8 !important;
     }
-    [data-testid="stMetricLabel"] { color: #475569 !important; font-size: 1.05rem !important; font-weight: 700 !important; }
-    [data-testid="stMetricValue"] { color: #0f172a !important; font-size: 1.8rem !important; font-weight: 800 !important; }
 
-    .stButton>button {
-        background-color: #0284c7; color: white !important; border-radius: 8px;
-        height: 48px; font-weight: 700; border: none; width: 100%;
-        box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
+    .main-header p {
+        margin-top: 6px;
+        color: #cbd5e1;
     }
-    .stButton>button:hover { background-color: #0369a1; }
+
+    .card {
+        background: white;
+        padding: 16px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        margin-bottom: 14px;
+    }
+
+    .success-box {
+        background: #ecfdf5;
+        border: 1px solid #10b981;
+        padding: 12px;
+        border-radius: 10px;
+    }
+
+    .warning-box {
+        background: #fffbeb;
+        border: 1px solid #f59e0b;
+        padding: 12px;
+        border-radius: 10px;
+    }
+
+    .danger-box {
+        background: #fef2f2;
+        border: 1px solid #ef4444;
+        padding: 12px;
+        border-radius: 10px;
+    }
+
+    .stButton > button {
+        min-height: 42px;
+        font-weight: 700;
+        border-radius: 8px;
+    }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True
+)
 
-# Database Initialization
-DB_FILE = "sd_tally_v32_permanent.db"
 
-def get_db():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+# ============================================================
+# DATABASE CONNECTION
+# ============================================================
+
+def db():
+    return sqlite3.connect(
+        DB_FILE,
+        check_same_thread=False
+    )
+
+
+def q(sql, params=()):
+    con = db()
+
+    try:
+        if pd is None:
+            raise RuntimeError(
+                "pandas is required. Install using: pip install pandas"
+            )
+
+        return pd.read_sql_query(
+            sql,
+            con,
+            params=params
+        )
+
+    finally:
+        con.close()
+
+
+def exec_sql(sql, params=()):
+    con = db()
+
+    try:
+        cur = con.cursor()
+        cur.execute(sql, params)
+        con.commit()
+        return cur.lastrowid
+
+    finally:
+        con.close()
+
+
+def exec_many(sql, rows):
+    con = db()
+
+    try:
+        cur = con.cursor()
+        cur.executemany(sql, rows)
+        con.commit()
+
+    finally:
+        con.close()
+
+
+# ============================================================
+# DATABASE INITIALIZATION
+# ============================================================
 
 def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-                    mobile TEXT PRIMARY KEY,
-                    name TEXT,
-                    business_name TEXT,
-                    business_address TEXT,
-                    gstin TEXT,
-                    reg_date TEXT,
-                    trial_end_date TEXT,
-                    is_paid INTEGER DEFAULT 0,
-                    paid_till TEXT,
-                    role TEXT DEFAULT 'Owner'
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS inventory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_mobile TEXT,
-                    item_name TEXT,
-                    unit TEXT DEFAULT 'PCS',
-                    barcode TEXT,
-                    hsn_sac TEXT,
-                    godown TEXT DEFAULT 'Main Store',
-                    batch_no TEXT,
-                    expiry_date TEXT,
-                    sale_price REAL,
-                    purchase_price REAL,
-                    gst_rate REAL,
-                    stock_qty REAL,
-                    min_stock_alert REAL DEFAULT 5,
-                    is_active INTEGER DEFAULT 1
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS godowns (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_mobile TEXT,
-                    godown_name TEXT,
-                    address TEXT,
-                    is_active INTEGER DEFAULT 1
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS parties (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_mobile TEXT,
-                    party_name TEXT,
-                    gstin TEXT,
-                    mobile TEXT,
-                    party_type TEXT,
-                    opening_balance REAL DEFAULT 0,
-                    is_active INTEGER DEFAULT 1
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS bank_accounts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_mobile TEXT,
-                    bank_name TEXT,
-                    account_no TEXT,
-                    ifsc_code TEXT,
-                    branch_name TEXT,
-                    opening_balance REAL DEFAULT 0,
-                    is_active INTEGER DEFAULT 1
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS vouchers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_mobile TEXT,
-                    voucher_type TEXT,
-                    voucher_no TEXT,
-                    date TEXT,
-                    party_name TEXT,
-                    item_name TEXT,
-                    unit TEXT DEFAULT 'PCS',
-                    hsn_sac TEXT,
-                    qty REAL,
-                    rate REAL,
-                    taxable_amt REAL,
-                    gst_rate REAL,
-                    cgst REAL,
-                    sgst REAL,
-                    igst REAL,
-                    total_amt REAL,
-                    payment_mode TEXT,
-                    eway_bill_no TEXT,
-                    irn_no TEXT,
-                    debit_account TEXT,
-                    credit_account TEXT
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS capital_bank_ledger (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_mobile TEXT,
-                    date TEXT,
-                    account_type TEXT,
-                    particulars TEXT,
-                    amount REAL,
-                    txn_type TEXT,
-                    bank_name TEXT
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS branding (
-                    user_mobile TEXT PRIMARY KEY,
-                    logo_base64 TEXT,
-                    sig_base64 TEXT
-                )''')
-    conn.commit()
-    conn.close()
+
+    con = db()
+    c = con.cursor()
+
+    tables = [
+
+        """
+        CREATE TABLE IF NOT EXISTS users(
+            mobile TEXT PRIMARY KEY,
+            name TEXT,
+            business_name TEXT,
+            business_address TEXT,
+            gstin TEXT,
+            state_code TEXT,
+            reg_date TEXT,
+            trial_end_date TEXT,
+            is_paid INTEGER DEFAULT 0,
+            paid_till TEXT,
+            role TEXT DEFAULT 'Owner',
+            pin_hash TEXT,
+            active INTEGER DEFAULT 1
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS settings(
+            user_mobile TEXT PRIMARY KEY,
+            financial_year TEXT,
+            invoice_prefix TEXT DEFAULT 'INV',
+            purchase_prefix TEXT DEFAULT 'PUR',
+            default_gst REAL DEFAULT 18,
+            company_state_code TEXT,
+            invoice_terms TEXT,
+            currency TEXT DEFAULT 'INR'
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS accounts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            name TEXT,
+            group_name TEXT,
+            account_type TEXT,
+            opening_debit REAL DEFAULT 0,
+            opening_credit REAL DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            UNIQUE(user_mobile, name)
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS parties(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            party_name TEXT,
+            gstin TEXT,
+            mobile TEXT,
+            email TEXT,
+            address TEXT,
+            state_code TEXT,
+            party_type TEXT,
+            opening_balance REAL DEFAULT 0,
+            credit_limit REAL DEFAULT 0,
+            credit_days INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS godowns(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            godown_name TEXT,
+            address TEXT,
+            active INTEGER DEFAULT 1,
+            UNIQUE(user_mobile, godown_name)
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            item_name TEXT,
+            sku TEXT,
+            barcode TEXT,
+            hsn_sac TEXT,
+            unit TEXT DEFAULT 'PCS',
+            godown TEXT DEFAULT 'Main Store',
+            sale_price REAL DEFAULT 0,
+            purchase_price REAL DEFAULT 0,
+            gst_rate REAL DEFAULT 0,
+            opening_qty REAL DEFAULT 0,
+            min_stock REAL DEFAULT 0,
+            batch_enabled INTEGER DEFAULT 0,
+            expiry_enabled INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            UNIQUE(user_mobile, item_name)
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS vouchers(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            voucher_type TEXT,
+            voucher_no TEXT,
+            vdate TEXT,
+            party_id INTEGER,
+            party_name TEXT,
+            payment_mode TEXT DEFAULT 'Credit',
+            narration TEXT,
+            taxable REAL DEFAULT 0,
+            cgst REAL DEFAULT 0,
+            sgst REAL DEFAULT 0,
+            igst REAL DEFAULT 0,
+            round_off REAL DEFAULT 0,
+            total REAL DEFAULT 0,
+            reference_no TEXT,
+            due_date TEXT,
+            status TEXT DEFAULT 'Posted',
+            created_at TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS voucher_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            voucher_id INTEGER,
+            item_id INTEGER,
+            item_name TEXT,
+            unit TEXT,
+            hsn_sac TEXT,
+            qty REAL,
+            rate REAL,
+            discount REAL DEFAULT 0,
+            taxable REAL,
+            gst_rate REAL,
+            cgst REAL DEFAULT 0,
+            sgst REAL DEFAULT 0,
+            igst REAL DEFAULT 0,
+            total REAL,
+            godown TEXT,
+            batch_no TEXT,
+            expiry_date TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS journal(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            voucher_id INTEGER,
+            vdate TEXT,
+            voucher_type TEXT,
+            voucher_no TEXT,
+            account_name TEXT,
+            debit REAL DEFAULT 0,
+            credit REAL DEFAULT 0,
+            narration TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS stock_moves(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            vdate TEXT,
+            voucher_id INTEGER,
+            item_id INTEGER,
+            item_name TEXT,
+            godown TEXT,
+            batch_no TEXT,
+            expiry_date TEXT,
+            move_type TEXT,
+            qty_in REAL DEFAULT 0,
+            qty_out REAL DEFAULT 0,
+            rate REAL DEFAULT 0,
+            reference_no TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS receipts_payments(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            vdate TEXT,
+            txn_type TEXT,
+            voucher_no TEXT,
+            party_id INTEGER,
+            party_name TEXT,
+            account_name TEXT,
+            amount REAL,
+            mode TEXT,
+            reference TEXT,
+            narration TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS allocations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            txn_id INTEGER,
+            invoice_id INTEGER,
+            amount REAL
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS expenses(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            vdate TEXT,
+            category TEXT,
+            description TEXT,
+            amount REAL,
+            mode TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS returns(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            vdate TEXT,
+            return_type TEXT,
+            reference_no TEXT,
+            party_name TEXT,
+            item_id INTEGER,
+            item_name TEXT,
+            qty REAL,
+            taxable REAL,
+            gst REAL,
+            total REAL,
+            reason TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS bank_accounts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            bank_name TEXT,
+            account_no TEXT,
+            ifsc TEXT,
+            branch TEXT,
+            opening_balance REAL DEFAULT 0,
+            active INTEGER DEFAULT 1
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS bank_statement(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            txn_date TEXT,
+            description TEXT,
+            reference TEXT,
+            debit REAL DEFAULT 0,
+            credit REAL DEFAULT 0,
+            balance REAL DEFAULT 0,
+            reconciled INTEGER DEFAULT 0,
+            imported_file TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS audit_log(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_mobile TEXT,
+            created_at TEXT,
+            action TEXT,
+            entity TEXT,
+            record_id INTEGER,
+            details TEXT
+        )
+        """,
+
+        """
+        CREATE TABLE IF NOT EXISTS branding(
+            user_mobile TEXT PRIMARY KEY,
+            logo_b64 TEXT,
+            signature_b64 TEXT,
+            bank_details TEXT
+        )
+        """
+    ]
+
+    for table_sql in tables:
+        c.execute(table_sql)
+
+    con.commit()
+    con.close()
+
 
 init_db()
 
-# Session Initializations
+
+# ============================================================
+# GENERAL HELPERS
+# ============================================================
+
+def now():
+    return datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
+def today():
+    return date.today().isoformat()
+
+
+def money(value):
+    try:
+        return f"₹ {float(value or 0):,.2f}"
+    except Exception:
+        return "₹ 0.00"
+
+
+def sha(value):
+    return hashlib.sha256(
+        str(value).encode("utf-8")
+    ).hexdigest()
+
+
+def current_user():
+    return st.session_state.get(
+        "user_mobile"
+    )
+
+
+def user_row():
+
+    if not current_user():
+        return None
+
+    data = q(
+        """
+        SELECT *
+        FROM users
+        WHERE mobile=?
+        AND active=1
+        """,
+        (current_user(),)
+    )
+
+    if data.empty:
+        return None
+
+    return data.iloc[0].to_dict()
+
+
+def settings_row():
+
+    if not current_user():
+        return {}
+
+    data = q(
+        """
+        SELECT *
+        FROM settings
+        WHERE user_mobile=?
+        """,
+        (current_user(),)
+    )
+
+    if data.empty:
+        return {}
+
+    return data.iloc[0].to_dict()
+
+
+def log(
+    action,
+    entity="",
+    record_id=None,
+    details=""
+):
+
+    if not current_user():
+        return
+
+    exec_sql(
+        """
+        INSERT INTO audit_log(
+            user_mobile,
+            created_at,
+            action,
+            entity,
+            record_id,
+            details
+        )
+        VALUES(?,?,?,?,?,?)
+        """,
+        (
+            current_user(),
+            now(),
+            action,
+            entity,
+            record_id,
+            details
+        )
+    )
+
+
+def fy_for(date_string):
+
+    d = datetime.strptime(
+        date_string,
+        "%Y-%m-%d"
+    ).date()
+
+    if d.month >= 4:
+        year = d.year
+    else:
+        year = d.year - 1
+
+    return (
+        f"{year}-{str(year + 1)[-2:]}"
+    )
+
+
+# ============================================================
+# ACCOUNT MASTER
+# ============================================================
+
+def ensure_accounts():
+
+    defaults = [
+
+        (
+            "Cash",
+            "Cash",
+            "Asset"
+        ),
+
+        (
+            "Bank",
+            "Bank",
+            "Asset"
+        ),
+
+        (
+            "Sales",
+            "Sales",
+            "Income"
+        ),
+
+        (
+            "Purchase",
+            "Purchase",
+            "Expense"
+        ),
+
+        (
+            "CGST Output",
+            "GST",
+            "Liability"
+        ),
+
+        (
+            "SGST Output",
+            "GST",
+            "Liability"
+        ),
+
+        (
+            "IGST Output",
+            "GST",
+            "Liability"
+        ),
+
+        (
+            "CGST Input",
+            "GST",
+            "Asset"
+        ),
+
+        (
+            "SGST Input",
+            "GST",
+            "Asset"
+        ),
+
+        (
+            "IGST Input",
+            "GST",
+            "Asset"
+        ),
+
+        (
+            "Capital",
+            "Capital",
+            "Equity"
+        ),
+
+        (
+            "Discount Allowed",
+            "Indirect Expense",
+            "Expense"
+        ),
+
+        (
+            "Discount Received",
+            "Indirect Income",
+            "Income"
+        ),
+
+        (
+            "Round Off",
+            "Indirect Expense",
+            "Expense"
+        ),
+
+        (
+            "Receivable",
+            "Sundry Debtors",
+            "Asset"
+        ),
+
+        (
+            "Payable",
+            "Sundry Creditors",
+            "Liability"
+        )
+    ]
+
+    for name, group_name, account_type in defaults:
+
+        exec_sql(
+            """
+            INSERT OR IGNORE INTO accounts(
+                user_mobile,
+                name,
+                group_name,
+                account_type
+            )
+            VALUES(?,?,?,?)
+            """,
+            (
+                current_user(),
+                name,
+                group_name,
+                account_type
+            )
+        )
+
+
+def account_names():
+
+    data = q(
+        """
+        SELECT name
+        FROM accounts
+        WHERE user_mobile=?
+        AND active=1
+        ORDER BY name
+        """,
+        (current_user(),)
+    )
+
+    if data.empty:
+        return []
+
+    return data["name"].tolist()
+
+
+# ============================================================
+# PARTY / ITEM HELPERS
+# ============================================================
+
+def party_options(party_type=None):
+
+    if party_type:
+
+        return q(
+            """
+            SELECT id, party_name
+            FROM parties
+            WHERE user_mobile=?
+            AND party_type IN (?, 'Both')
+            AND active=1
+            ORDER BY party_name
+            """,
+            (
+                current_user(),
+                party_type
+            )
+        )
+
+    return q(
+        """
+        SELECT id, party_name
+        FROM parties
+        WHERE user_mobile=?
+        AND active=1
+        ORDER BY party_name
+        """,
+        (current_user(),)
+    )
+
+
+def item_options():
+
+    return q(
+        """
+        SELECT *
+        FROM items
+        WHERE user_mobile=?
+        AND active=1
+        ORDER BY item_name
+        """,
+        (current_user(),)
+    )
+
+
+# ============================================================
+# VOUCHER NUMBER
+# ============================================================
+
+def next_no(kind):
+
+    settings = settings_row()
+
+    if kind == "Sales":
+        prefix = settings.get(
+            "invoice_prefix",
+            "INV"
+        )
+    else:
+        prefix = settings.get(
+            "purchase_prefix",
+            "PUR"
+        )
+
+    fy = fy_for(today())
+
+    data = q(
+        """
+        SELECT voucher_no
+        FROM vouchers
+        WHERE user_mobile=?
+        AND voucher_type=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (
+            current_user(),
+            kind
+        )
+    )
+
+    number = 1
+
+    if not data.empty:
+
+        value = str(
+            data.iloc[0]["voucher_no"]
+        )
+
+        try:
+            number = (
+                int(
+                    value.split("-")[-1]
+                ) + 1
+            )
+        except Exception:
+            number = 1
+
+    return (
+        f"{prefix}-{fy}-{number:05d}"
+    )
+
+
+# ============================================================
+# GST CALCULATION
+# ============================================================
+
+def gst_split(
+    taxable,
+    gst_rate,
+    same_state=True
+):
+
+    taxable = float(taxable or 0)
+    gst_rate = float(gst_rate or 0)
+
+    tax = round(
+        taxable * gst_rate / 100,
+        2
+    )
+
+    if same_state:
+        half = round(
+            tax / 2,
+            2
+        )
+
+        return (
+            half,
+            round(tax - half, 2),
+            0.0
+        )
+
+    return (
+        0.0,
+        0.0,
+        tax
+    )
+
+
+# ============================================================
+# STOCK BALANCE
+# ============================================================
+
+def stock_balance(
+    item_id,
+    godown=None
+):
+
+    params = [
+        current_user(),
+        item_id
+    ]
+
+    sql = """
+        SELECT
+            COALESCE(
+                SUM(qty_in - qty_out),
+                0
+            ) AS qty
+        FROM stock_moves
+        WHERE user_mobile=?
+        AND item_id=?
+    """
+
+    if godown:
+
+        sql += """
+            AND godown=?
+        """
+
+        params.append(godown)
+
+    data = q(
+        sql,
+        tuple(params)
+    )
+
+    if data.empty:
+        return 0.0
+
+    return float(
+        data.iloc[0]["qty"] or 0
+    )
+
+
+# ============================================================
+# STOCK MOVEMENT
+# ============================================================
+
+def add_stock(
+    voucher_id,
+    vdate,
+    item_id,
+    item_name,
+    godown,
+    qty_in,
+    qty_out,
+    rate,
+    move_type,
+    batch="",
+    expiry="",
+    ref=""
+):
+
+    return exec_sql(
+        """
+        INSERT INTO stock_moves(
+            user_mobile,
+            vdate,
+            voucher_id,
+            item_id,
+            item_name,
+            godown,
+            batch_no,
+            expiry_date,
+            move_type,
+            qty_in,
+            qty_out,
+            rate,
+            reference_no
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            current_user(),
+            vdate,
+            voucher_id,
+            item_id,
+            item_name,
+            godown,
+            batch,
+            expiry,
+            move_type,
+            qty_in,
+            qty_out,
+            rate,
+            ref
+        )
+    )
+
+
+# ============================================================
+# JOURNAL POSTING
+# ============================================================
+
+def post_journal(
+    voucher_id,
+    voucher_type,
+    voucher_no,
+    vdate,
+    entries,
+    narration=""
+):
+
+    """
+    entries format:
+
+    [
+        ("Account", debit, credit),
+        ("Account", debit, credit)
+    ]
+    """
+
+    total_debit = 0.0
+    total_credit = 0.0
+
+    for account, debit, credit in entries:
+
+        debit = float(debit or 0)
+        credit = float(credit or 0)
+
+        total_debit += debit
+        total_credit += credit
+
+        exec_sql(
+            """
+            INSERT INTO journal(
+                user_mobile,
+                voucher_id,
+                vdate,
+                voucher_type,
+                voucher_no,
+                account_name,
+                debit,
+                credit,
+                narration
+            )
+            VALUES(?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                current_user(),
+                voucher_id,
+                vdate,
+                voucher_type,
+                voucher_no,
+                account,
+                debit,
+                credit,
+                narration
+            )
+        )
+
+    # Accounting integrity check
+    if round(total_debit, 2) != round(
+        total_credit,
+        2
+    ):
+
+        raise ValueError(
+            "Journal is not balanced. "
+            f"Debit={total_debit:.2f}, "
+            f"Credit={total_credit:.2f}"
+        )
+
+    log(
+        "POST",
+        "journal",
+        voucher_id,
+        f"{voucher_type} {voucher_no}"
+    )
+
+
+# ============================================================
+# PDF INVOICE
+# ============================================================
+
+def invoice_pdf(voucher_id):
+
+    if not REPORTLAB_OK:
+        return None
+
+    header = q(
+        """
+        SELECT *
+        FROM vouchers
+        WHERE id=?
+        AND user_mobile=?
+        """,
+        (
+            voucher_id,
+            current_user()
+        )
+    )
+
+    if header.empty:
+        return None
+
+    items = q(
+        """
+        SELECT *
+        FROM voucher_items
+        WHERE voucher_id=?
+        ORDER BY id
+        """,
+        (voucher_id,)
+    )
+
+    row = header.iloc[0]
+    user = user_row()
+
+    bio = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        bio,
+        pagesize=A4,
+        rightMargin=30,
+        leftMargin=30,
+        topMargin=30,
+        bottomMargin=30
+    )
+
+    styles = getSampleStyleSheet()
+
+    story = []
+
+    story.append(
+        Paragraph(
+            f"<b>{user.get('business_name','')}</b>",
+            styles["Title"]
+        )
+    )
+
+    story.append(
+        Paragraph(
+            f"{user.get('business_address','')}"
+            f"<br/>GSTIN: {user.get('gstin','')}",
+            styles["Normal"]
+        )
+    )
+
+    story.append(
+        Spacer(1, 10)
+    )
+
+    story.append(
+        Paragraph(
+            f"<b>Tax Invoice</b> "
+            f"#{row['voucher_no']} "
+            f"| Date: {row['vdate']}",
+            styles["Heading2"]
+        )
+    )
+
+    story.append(
+        Paragraph(
+            f"Party: {row['party_name']}",
+            styles["Normal"]
+        )
+    )
+
+    story.append(
+        Spacer(1, 10)
+    )
+
+    table_data = [
+        [
+            "Item",
+            "HSN",
+            "Qty",
+            "Rate",
+            "Disc",
+            "Taxable",
+            "GST",
+            "Total"
+        ]
+    ]
+
+    for _, item in items.iterrows():
+
+        table_data.append(
+            [
+                item["item_name"],
+                item["hsn_sac"],
+                item["qty"],
+                item["rate"],
+                item["discount"],
+                item["taxable"],
+                (
+                    item["cgst"]
+                    + item["sgst"]
+                    + item["igst"]
+                ),
+                item["total"]
+            ]
+        )
+
+    table_data.extend(
+        [
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Taxable",
+                row["taxable"],
+                ""
+            ],
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "CGST",
+                row["cgst"],
+                ""
+            ],
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "SGST",
+                row["sgst"],
+                ""
+            ],
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "IGST",
+                row["igst"],
+                ""
+            ],
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Grand Total",
+                row["total"],
+                ""
+            ]
+        ]
+    )
+
+    table = Table(
+        table_data,
+        repeatRows=1
+    )
+
+    table.setStyle(
+        TableStyle(
+            [
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.grey
+                ),
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.lightgrey
+                ),
+                (
+                    "ALIGN",
+                    (2, 1),
+                    (-1, -1),
+                    "RIGHT"
+                )
+            ]
+        )
+    )
+
+    story.append(table)
+
+    story.append(
+        Spacer(1, 12)
+    )
+
+    terms = settings_row().get(
+        "invoice_terms",
+        ""
+    )
+
+    if terms:
+        story.append(
+            Paragraph(
+                terms,
+                styles["Normal"]
+            )
+        )
+
+    doc.build(story)
+
+    return bio.getvalue()
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
 if "user_mobile" not in st.session_state:
     st.session_state.user_mobile = None
-if "user_role" not in st.session_state:
-    st.session_state.user_role = "Owner"
-if "business_name" not in st.session_state:
-    st.session_state.business_name = None
-if "business_gstin" not in st.session_state:
-    st.session_state.business_gstin = None
-if "otp_sent" not in st.session_state:
-    st.session_state.otp_sent = False
-if "generated_otp" not in st.session_state:
-    st.session_state.generated_otp = None
-if "cart_items" not in st.session_state:
-    st.session_state.cart_items = []
 
-# AUTO RESTORE SESSION FROM URL (NO LOGOUT ON BACK)
-try:
-    query_params = st.query_params
-    saved_mobile = query_params.get("user_session", None)
-    if not st.session_state.user_mobile and saved_mobile:
-        st.session_state.user_mobile = str(saved_mobile)
-except Exception:
-    pass
+if "otp" not in st.session_state:
+    st.session_state.otp = None
 
-def check_subscription_and_profile(mobile):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT reg_date, trial_end_date, is_paid, paid_till, role, business_name, gstin FROM users WHERE mobile=?", (mobile,))
-    user = c.fetchone()
-    conn.close()
-    
-    if not user:
-        return "NEW_USER", None
-    
-    st.session_state.user_role = user[4] if len(user) > 4 and user[4] else "Owner"
-    st.session_state.business_name = user[5] if len(user) > 5 and user[5] else None
-    st.session_state.business_gstin = user[6] if len(user) > 6 and user[6] else "URP"
-    
-    today = datetime.now().date()
-    trial_end = datetime.strptime(user[0], "%Y-%m-%d").date()
-    
-    sub_status = "EXPIRED"
-    if user[2] == 1 and user[3]:
-        paid_till = datetime.strptime(user[3], "%Y-%m-%d").date()
-        if today <= paid_till:
-            sub_status = "ACTIVE_PRO"
-    elif today <= trial_end:
-        days_left = (trial_end - today).days
-        sub_status = f"FREE_TRIAL ({days_left} days left)"
-    
-    return sub_status, st.session_state.business_name
+if "cart" not in st.session_state:
+    st.session_state.cart = []
 
+if "invoice_draft" not in st.session_state:
+    st.session_state.invoice_draft = []
+
+if "pur_rows" not in st.session_state:
+    st.session_state.pur_rows = []
+
+
+# ============================================================
 # LOGIN SCREEN
-if not st.session_state.user_mobile:
-    st.markdown("""
+# ============================================================
+
+if not current_user():
+
+    st.markdown(
+        """
         <div class="main-header">
-            <h1>💼 SD TALLY BUSINESS</h1>
-            <p>Cloud ERP, Billing & Complete Accounting Suite</p>
+            <h1>🏢 SD TALLY BUSINESS</h1>
+            <p>
+                Professional All-in-One
+                Accounting & ERP
+            </p>
         </div>
-    """, unsafe_allow_html=True)
-    
-    col1, _ = st.columns([1, 1])
-    with col1:
-        st.subheader("🔑 Sign In with Mobile OTP")
-        mobile = st.text_input("📱 Mobile Number", max_chars=10, placeholder="Enter 10-digit mobile number")
-        
-        if not st.session_state.otp_sent:
-            if st.button("Send Verification OTP"):
-                if len(mobile) == 10 and mobile.isdigit():
-                    st.session_state.generated_otp = str(random.randint(1000, 9999))
-                    st.session_state.otp_sent = True
-                    st.info(f"🔑 Verification Testing OTP: **{st.session_state.generated_otp}**")
-                else:
-                    st.error("Please enter a valid 10-digit mobile number.")
+        """,
+        unsafe_allow_html=True
+    )
+
+    mobile = st.text_input(
+        "📱 Mobile Number",
+        max_chars=10
+    )
+
+    if st.button("Send OTP"):
+
+        if (
+            mobile.isdigit()
+            and len(mobile) == 10
+        ):
+
+            st.session_state.otp = str(
+                secrets.randbelow(9000) + 1000
+            )
+
+            st.info(
+                "Development OTP: "
+                + st.session_state.otp
+            )
+
         else:
-            otp_in = st.text_input("🔑 Enter 4-Digit OTP")
-            role_sel = st.selectbox("Select Access Role", ["Owner", "Salesman / Staff"])
-            if st.button("Verify OTP & Open Workspace"):
-                if otp_in == st.session_state.generated_otp:
-                    st.session_state.user_mobile = mobile
-                    st.session_state.user_role = role_sel
-                    try:
-                        st.query_params["user_session"] = mobile
-                    except Exception:
-                        pass
-                    
-                    conn = get_db()
-                    c = conn.cursor()
-                    c.execute("SELECT mobile FROM users WHERE mobile=?", (mobile,))
-                    if not c.fetchone():
-                        today = datetime.now().date()
-                        trial_end = today + timedelta(days=10)
-                        c.execute("INSERT INTO users (mobile, name, reg_date, trial_end_date, is_paid, role) VALUES (?, ?, ?, ?, 0, ?)",
-                                  (mobile, "Business User", str(today), str(trial_end), role_sel))
-                        conn.commit()
-                    conn.close()
-                    st.rerun()
-                else:
-                    st.error("Invalid OTP entered.")
+
+            st.error(
+                "Valid 10-digit mobile number required."
+            )
+
+    if st.session_state.otp:
+
+        otp = st.text_input(
+            "Enter OTP",
+            max_chars=4
+        )
+
+        if st.button(
+            "Verify & Continue"
+        ):
+
+            if otp == st.session_state.otp:
+
+                st.session_state.user_mobile = mobile
+
+                existing = q(
+                    """
+                    SELECT mobile
+                    FROM users
+                    WHERE mobile=?
+                    """,
+                    (mobile,)
+                )
+
+                if existing.empty:
+
+                    start = date.today()
+
+                    exec_sql(
+                        """
+                        INSERT INTO users(
+                            mobile,
+                            name,
+                            reg_date,
+                            trial_end_date,
+                            role
+                        )
+                        VALUES(?,?,?,?,?)
+                        """,
+                        (
+                            mobile,
+                            "Business User",
+                            str(start),
+                            str(
+                                start
+                                + timedelta(days=10)
+                            ),
+                            "Owner"
+                        )
+                    )
+
+                ensure_accounts()
+
+                st.rerun()
+
+            else:
+
+                st.error(
+                    "Invalid OTP."
+                )
+
     st.stop()
 
-# CHECK PROFILE & ONBOARDING
-sub_status, bus_name = check_subscription_and_profile(st.session_state.user_mobile)
 
-if not bus_name:
-    st.markdown("""
-        <div class="main-header">
-            <h1>🏢 Business Profile Setup</h1>
-            <p>Enter your business details to create your secure cloud ledger workspace</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.subheader("📋 Business Onboarding Information")
-    b_name = st.text_input("🏢 Business / Shop Name (e.g., Shree Ganesh Enterprises)")
-    b_addr = st.text_area("📍 Business Address")
-    b_gst = st.text_input("🧾 GSTIN Number (Optional)")
-    
-    if st.button("Save Business Profile & Launch"):
-        if b_name:
-            conn = get_db()
-            c = conn.cursor()
-            c.execute("UPDATE users SET business_name=?, business_address=?, gstin=? WHERE mobile=?",
-                      (b_name, b_addr, b_gst, st.session_state.user_mobile))
-            conn.commit()
-            conn.close()
-            st.session_state.business_name = b_name
-            st.session_state.business_gstin = b_gst
-            st.success("✅ Business Profile Setup Complete!")
-            st.rerun()
-        else:
-            st.error("Please enter your Business Name.")
-    st.stop()
+# ============================================================
+# USER VALIDATION
+# ============================================================
 
-# SIDEBAR WORKSPACE
-st.sidebar.markdown(f"""
-    <div class="user-card">
-        👤 <b>User:</b> {st.session_state.user_mobile}<br>
-        🏢 <b>Business:</b> {st.session_state.business_name}
-    </div>
-    <div class="plan-card">
-        🎁 <b>Plan:</b> {sub_status}
-    </div>
-""", unsafe_allow_html=True)
+user = user_row()
 
-if st.sidebar.button("🚪 Logout Account"):
+if not user:
+
     st.session_state.user_mobile = None
-    st.session_state.business_name = None
-    st.session_state.otp_sent = False
-    try:
-        st.query_params.clear()
-    except Exception:
-        pass
     st.rerun()
 
-if sub_status == "EXPIRED":
-    st.sidebar.error("❌ Subscription Expired")
-    st.title("💳 Renewal Required")
-    st.warning("Your trial has ended. Renew subscription for ₹95 + 18% GST (Total ₹112.10).")
-    st.markdown("### **UPI ID: `8381085702@ibl`**")
-    
-    wa_renew_msg = urllib.parse.quote(f"Hi, I have paid Rs.112.10 for SD Tally Business renewal for Mobile: {st.session_state.user_mobile}")
-    st.markdown(f"[👉 **Click Here to Send Proof on WhatsApp**](https://wa.me/918381085702?text={wa_renew_msg})")
+
+# ============================================================
+# BUSINESS PROFILE SETUP
+# ============================================================
+
+if not user.get("business_name"):
+
+    st.markdown(
+        """
+        <div class="main-header">
+            <h1>🏢 Business Setup</h1>
+            <p>
+                Complete your business details
+                before launching the ERP.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    with st.form("business_setup"):
+
+        business_name = st.text_input(
+            "Business Name"
+        )
+
+        address = st.text_area(
+            "Business Address"
+        )
+
+        gstin = st.text_input(
+            "GSTIN"
+        )
+
+        state_code = st.text_input(
+            "State Code",
+            max_chars=2
+        )
+
+        submitted = st.form_submit_button(
+            "Save & Launch"
+        )
+
+        if submitted:
+
+            if not business_name.strip():
+
+                st.error(
+                    "Business name is required."
+                )
+
+            else:
+
+                exec_sql(
+                    """
+                    UPDATE users
+                    SET business_name=?,
+                        business_address=?,
+                        gstin=?,
+                        state_code=?
+                    WHERE mobile=?
+                    """,
+                    (
+                        business_name.strip(),
+                        address.strip(),
+                        gstin.strip().upper(),
+                        state_code.strip(),
+                        current_user()
+                    )
+                )
+
+                exec_sql(
+                    """
+                    INSERT OR IGNORE INTO settings(
+                        user_mobile,
+                        financial_year,
+                        company_state_code,
+                        invoice_terms
+                    )
+                    VALUES(?,?,?,?)
+                    """,
+                    (
+                        current_user(),
+                        fy_for(today()),
+                        state_code.strip(),
+                        "Goods once sold are subject to business return policy."
+                    )
+                )
+
+                ensure_accounts()
+
+                st.success(
+                    "Business setup completed."
+                )
+
+                st.rerun()
+
     st.stop()
 
-# ALL 30 MODULE DROPDOWN NAVIGATION
-menu_options = [
-    "🏠 Dashboard",
-    "📁 Masters (Items, Godowns & Parties)",
-    "🛒 Purchase Entry",
-    "📥 Purchase & GSTR-2B Import",
-    "🧾 Tax Invoice (Sales)",
-    "📦 Barcode Quick Billing",
-    "🖨️ Thermal Receipt Print",
-    "💰 All Tally Vouchers (F4-F9)",
-    "🏦 Capital & Bank Account Management",
-    "📊 Bank Statement Excel Import",
-    "👥 Receivables & Party Statements",
-    "🧮 GST Reports (GSTR-1, 2B & 3B)",
-    "🚚 e-Way Bill & e-Invoicing Portal",
-    "📈 Profit & Loss Account",
-    "📋 Balance Sheet",
-    "☁️ Automated Cloud Backup",
-    "🏢 Company Branding & Signature",
-    "💳 Account & Billing",
-    "📦 Stock Summary & Stock Ledger",
-    "🔄 Sales Return & Purchase Return",
-    "💸 Payment & Receipt Management",
-    "📅 Day Book",
-    "📒 Ledger & Trial Balance",
-    "📑 Outstanding Receivable & Payable",
-    "🔍 Voucher Search / Edit / Delete",
-    "📊 Business Dashboard & Reports",
-    "🔐 User & Permission Management",
-    "⚙️ Company Settings",
-    "🖨️ Print & PDF Export",
-    "📤 Excel / PDF Report Export"
-]
 
-st.sidebar.markdown("### 📌 Navigation")
-menu = st.sidebar.selectbox("Select Module:", menu_options)
+# ============================================================
+# SUBSCRIPTION CHECK
+# ============================================================
 
-st.markdown(f"""
-    <div class="main-header">
-        <h1>{st.session_state.business_name}</h1>
-        <p>SD TALLY BUSINESS Enterprise Workspace | Account: {st.session_state.user_mobile}</p>
-    </div>
-""", unsafe_allow_html=True)
+expired = False
 
-user_mob = st.session_state.user_mobile
+try:
 
-# ---------------- MODULE IMPLEMENTATIONS ----------------
+    trial_expired = (
+        not user["is_paid"]
+        and date.today()
+        > datetime.strptime(
+            user["trial_end_date"],
+            "%Y-%m-%d"
+        ).date()
+    )
 
-# 1. DASHBOARD
-if menu == "🏠 Dashboard" or menu == "📊 Business Dashboard & Reports":
-    st.subheader("📊 Business Executive Dashboard & Analytics")
-    conn = get_db()
-    sales_df = pd.read_sql_query("SELECT SUM(total_amt) as total FROM vouchers WHERE voucher_type IN ('Sales', 'Tax Invoice') AND user_mobile=?", conn, params=(user_mob,))
-    pur_df = pd.read_sql_query("SELECT SUM(total_amt) as total FROM vouchers WHERE voucher_type='Purchase' AND user_mobile=?", conn, params=(user_mob,))
-    bank_df = pd.read_sql_query("SELECT SUM(opening_balance) as total FROM bank_accounts WHERE user_mobile=?", conn, params=(user_mob,))
-    
-    total_sales = sales_df['total'].iloc[0] or 0.0
-    total_pur = pur_df['total'].iloc[0] or 0.0
-    total_bank = bank_df['total'].iloc[0] or 0.0
-    
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Sales Revenue", f"₹ {total_sales:,.2f}")
-    c2.metric("Total Purchases", f"₹ {total_pur:,.2f}")
-    c3.metric("Net Gross Profit", f"₹ {(total_sales - total_pur):,.2f}")
-    c4.metric("Bank Balance", f"₹ {total_bank:,.2f}")
-    
-    st.markdown("---")
-    st.subheader("📈 Monthly Performance Overview")
-    chart_data = pd.DataFrame({
-        "Category": ["Total Revenue", "Total Purchases", "Operating Profit"],
-        "Amount (₹)": [total_sales, total_pur, max(0, total_sales - total_pur)]
-    })
-    st.bar_chart(chart_data.set_index("Category"))
+    paid_expired = (
+        user["is_paid"]
+        and user["paid_till"]
+        and date.today()
+        > datetime.strptime(
+            user["paid_till"],
+            "%Y-%m-%d"
+        ).date()
+    )
 
-# 2. MASTERS
-elif menu == "📁 Masters (Items, Godowns & Parties)":
-    st.subheader("⚙️ Masters Configuration")
-    tab1, tab2, tab3 = st.tabs(["📦 Add Stock Item", "🏢 Godown Master", "👤 Add Party Ledger"])
-    conn = get_db()
-    c = conn.cursor()
-    
-    with tab1:
-        u1, u2 = st.columns([3, 1])
-        i_name = u1.text_input("Item Name")
-        i_unit = u2.selectbox("Unit (UOM)", ["PCS", "KG", "LTR", "MTR", "BOX", "SQFT", "BAG", "PACK"])
-        s_price = st.number_input("Selling Price (₹)", min_value=0.0)
-        p_price = st.number_input("Purchase Price (₹)", min_value=0.0)
-        gst = st.selectbox("GST %", [0.0, 5.0, 12.0, 18.0, 28.0])
-        op_stock = st.number_input("Opening Stock Qty", min_value=0.0)
-        
-        if st.button("Save Stock Item Master"):
-            if i_name:
-                c.execute("""INSERT INTO inventory (user_mobile, item_name, unit, sale_price, purchase_price, gst_rate, stock_qty)
-                             VALUES (?, ?, ?, ?, ?, ?, ?)""", (user_mob, i_name, i_unit, s_price, p_price, gst, op_stock))
-                conn.commit()
-                st.success("Stock Master Saved!")
+    expired = (
+        trial_expired
+        or paid_expired
+    )
 
-    with tab2:
-        g_name = st.text_input("Godown Name")
-        g_addr = st.text_area("Address")
-        if st.button("Save Godown"):
-            c.execute("INSERT INTO godowns (user_mobile, godown_name, address) VALUES (?, ?, ?)", (user_mob, g_name, g_addr))
-            conn.commit()
-            st.success("Godown Saved!")
+except Exception:
 
-    with tab3:
-        p_name = st.text_input("Party Name")
-        p_type = st.selectbox("Party Type", ["Customer", "Supplier"])
-        p_bal = st.number_input("Opening Balance (₹)", min_value=0.0)
-        if st.button("Save Party"):
-            c.execute("INSERT INTO parties (user_mobile, party_name, party_type, opening_balance) VALUES (?, ?, ?, ?)", (user_mob, p_name, p_type, p_bal))
-            conn.commit()
-            st.success("Party Ledger Created!")
+    expired = False
 
-# 3. STOCK SUMMARY & LEDGER
-elif menu == "📦 Stock Summary & Stock Ledger":
-    st.subheader("📦 Stock Inventory Summary")
-    conn = get_db()
-    df_stock = pd.read_sql_query("SELECT item_name, unit, sale_price, purchase_price, stock_qty FROM inventory WHERE user_mobile=?", conn, params=(user_mob,))
-    st.dataframe(df_stock, use_container_width=True)
 
-# 4. DAY BOOK
-elif menu == "📅 Day Book":
-    st.subheader("📅 Daily Accounting Day Book")
-    conn = get_db()
-    df_day = pd.read_sql_query("SELECT date, voucher_type, voucher_no, party_name, total_amt, payment_mode FROM vouchers WHERE user_mobile=? ORDER BY date DESC", conn, params=(user_mob,))
-    st.dataframe(df_day, use_container_width=True)
+if expired:
 
-# 5. LEDGER & TRIAL BALANCE
-elif menu == "📒 Ledger & Trial Balance":
-    st.subheader("📒 Trial Balance Statement")
-    conn = get_db()
-    df_v = pd.read_sql_query("SELECT debit_account as Ledger, SUM(total_amt) as Debit_Total FROM vouchers WHERE user_mobile=? GROUP BY debit_account", conn, params=(user_mob,))
-    st.dataframe(df_v, use_container_width=True)
+    st.error(
+        "Your trial/subscription has expired."
+    )
 
-# 6. OUTSTANDING RECEIVABLES & PAYABLES
-elif menu == "👥 Receivables & Party Statements" or menu == "📑 Outstanding Receivable & Payable":
-    st.subheader("👥 Customer Receivables & Supplier Payables")
-    conn = get_db()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### Customer Outstanding")
-        cust_df = pd.read_sql_query("SELECT party_name, SUM(total_amt) as Pending FROM vouchers WHERE payment_mode='Credit (Pending)' AND user_mobile=? GROUP BY party_name", conn, params=(user_mob,))
-        st.dataframe(cust_df, use_container_width=True)
-    with c2:
-        st.markdown("### Supplier Outstanding")
-        supp_df = pd.read_sql_query("SELECT party_name, SUM(total_amt) as Pending FROM vouchers WHERE voucher_type='Purchase' AND payment_mode='Credit' AND user_mobile=? GROUP BY party_name", conn, params=(user_mob,))
-        st.dataframe(supp_df, use_container_width=True)
+    st.stop()
 
-# 7. VOUCHER SEARCH / EDIT / DELETE
-elif menu == "🔍 Voucher Search / Edit / Delete":
-    st.subheader("🔍 Voucher Register & Edit Actions")
-    conn = get_db()
-    c = conn.cursor()
-    df_all_v = pd.read_sql_query("SELECT id, voucher_type, voucher_no, date, party_name, total_amt FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
-    st.dataframe(df_all_v, use_container_width=True)
-    if not df_all_v.empty:
-        del_id = st.selectbox("Select Voucher ID to Delete", df_all_v['id'].tolist())
-        if st.button("🗑️ Delete Voucher Entry"):
-            c.execute("DELETE FROM vouchers WHERE id=? AND user_mobile=?", (del_id, user_mob))
-            conn.commit()
-            st.success("Voucher Entry Deleted!")
-            st.rerun()
 
-# 8. TAX INVOICE (SALES)
-elif menu == "🧾 Tax Invoice (Sales)":
-    st.subheader("🧾 Create Multi-Item Tax Invoice")
-    conn = get_db()
-    c = conn.cursor()
-    v_no = st.text_input("Invoice Number", f"INV-{random.randint(1000,9999)}")
-    p_name = st.text_input("Customer Name")
-    amt = st.number_input("Invoice Amount (₹)", min_value=1.0)
-    p_mode = st.selectbox("Payment Mode", ["Bank / UPI", "Cash", "Credit (Pending)"])
-    if st.button("Save Sales Invoice"):
-        c.execute("INSERT INTO vouchers (user_mobile, voucher_type, voucher_no, date, party_name, total_amt, payment_mode) VALUES (?, 'Tax Invoice', ?, ?, ?, ?, ?)",
-                  (user_mob, v_no, str(datetime.now().date()), p_name, amt, p_mode))
-        conn.commit()
-        st.success(f"Invoice {v_no} Saved Successfully!")
+# ============================================================
+# MAKE SURE DEFAULT ACCOUNTS EXIST
+# ============================================================
 
-# 9. THERMAL RECEIPT PRINT
-elif menu == "🖨️ Thermal Receipt Print":
-    st.subheader("🖨️ POS 58mm Thermal Printer Receipt")
-    conn = get_db()
-    df_v = pd.read_sql_query("SELECT voucher_no, party_name, total_amt FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
-    if not df_v.empty:
-        sel_v = st.selectbox("Select Invoice", df_v['voucher_no'].tolist())
-        row = df_v[df_v['voucher_no'] == sel_v].iloc[0]
-        html_r = f"""
-        <div style="background:#fff; padding:15px; border:1px dashed #000; font-family:monospace; width:260px; margin:auto;">
-            <center><h3>{st.session_state.business_name}</h3><p>Retail Invoice</p></center>
-            <p>Inv: {row['voucher_no']}</p>
-            <p>Customer: {row['party_name']}</p>
-            <hr>
-            <h3>Total: Rs. {row['total_amt']:,.2f}</h3>
-            <center><p>Thank You!</p></center>
-        </div>
-        """
-        components.html(html_r, height=300)
+ensure_accounts()
 
-# 10. CLOUD BACKUP & REPORT EXPORT
-elif menu == "☁️ Automated Cloud Backup" or menu == "🖨️ Print & PDF Export" or menu == "📤 Excel / PDF Report Export":
-    st.subheader("☁️ Database Backup & Report Export")
-    conn = get_db()
-    df_all = pd.read_sql_query("SELECT * FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
-    csv_data = df_all.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Backup (CSV)", data=csv_data, file_name=f"{st.session_state.business_name}_Backup.csv", mime="text/csv")
 
-# FALLBACK FOR OTHER MENUS
-else:
-    st.subheader(f"📌 {menu}")
-    st.info("This module is actively synced with your enterprise cloud database.")
+# ============================================================
+# PART 1 END
+# ============================================================

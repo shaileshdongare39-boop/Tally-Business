@@ -10,7 +10,7 @@ try:
 except ModuleNotFoundError:
     px = None
 
-# Page Configuration
+# 1. Page Configuration
 st.set_page_config(
     page_title="SD TALLY BUSINESS",
     layout="wide",
@@ -18,18 +18,35 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling with Mobile Scroll Fix & High Contrast Theme
+# 2. ALL SESSION STATES INITIALIZATION (FIX FOR ATTRIBUTE ERROR)
+if "user_mobile" not in st.session_state:
+    st.session_state.user_mobile = None
+if "user_role" not in st.session_state:
+    st.session_state.user_role = "Owner"
+if "business_name" not in st.session_state:
+    st.session_state.business_name = None
+if "otp_sent" not in st.session_state:
+    st.session_state.otp_sent = False
+if "generated_otp" not in st.session_state:
+    st.session_state.generated_otp = None
+
+# Query Params Session Restore (Fix for Auto-login refresh)
+try:
+    query_params = st.query_params
+    saved_mobile = query_params.get("user", None)
+    if not st.session_state.user_mobile and saved_mobile:
+        st.session_state.user_mobile = saved_mobile
+except Exception:
+    pass
+
+# Custom Styling
 st.markdown("""
     <style>
-    /* Fix Mobile Scrolling Problem */
     html, body, [data-testid="stAppViewContainer"] {
         overflow-y: auto !important;
         -webkit-overflow-scrolling: touch !important;
     }
-    
     .stApp { background-color: #f8fafc; color: #0f172a; }
-    
-    /* Sidebar High-Visibility Text Fix */
     [data-testid="stSidebar"] {
         background-color: #ffffff !important;
         border-right: 1px solid #e2e8f0;
@@ -39,8 +56,6 @@ st.markdown("""
         font-weight: 600 !important;
         font-size: 0.95rem !important;
     }
-    
-    /* Header Banner Styling */
     .main-header {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         color: #ffffff;
@@ -51,8 +66,6 @@ st.markdown("""
     }
     .main-header h1 { color: #38bdf8 !important; font-size: 2.1rem; font-weight: 700; margin: 0; }
     .main-header p { color: #94a3b8 !important; font-size: 0.95rem; margin-top: 4px; margin-bottom: 0; }
-
-    /* Custom Cards for User & Subscription */
     .user-card {
         background-color: #f1f5f9;
         padding: 12px 15px;
@@ -67,8 +80,6 @@ st.markdown("""
         color: #0369a1 !important;
         margin-bottom: 20px;
     }
-
-    /* Metric Cards Styling Fix */
     [data-testid="stMetric"] {
         background-color: #ffffff !important;
         padding: 18px !important;
@@ -87,8 +98,6 @@ st.markdown("""
         font-size: 1.8rem !important;
         font-weight: 800 !important;
     }
-
-    /* Button Styling */
     .stButton>button {
         background-color: #0284c7;
         color: white !important;
@@ -100,8 +109,6 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2);
     }
     .stButton>button:hover { background-color: #0369a1; }
-
-    /* Thermal Receipt Formatting */
     .thermal-receipt {
         background-color: #ffffff;
         color: #000000;
@@ -194,23 +201,6 @@ def init_db():
 
 init_db()
 
-# Auto Login Persistence check using Query Params (रिफ्रेश केल्यावर ऑटोमॅटिक लॉगिन राहण्यासाठी)
-query_params = st.query_params
-saved_mobile = query_params.get("user", None)
-
-if "user_mobile" not in st.session_state or not st.session_state.user_mobile:
-    if saved_mobile:
-        st.session_state.user_mobile = saved_mobile
-
-if "user_role" not in st.session_state:
-    st.session_state.user_role = "Owner"
-if "business_name" not in st.session_state:
-    st.session_state.business_name = None
-if "otp_sent" not in st.session_state:
-    st.session_state.otp_sent = False
-if "generated_otp" not in st.session_state:
-    st.session_state.generated_otp = None
-
 def check_subscription_and_profile(mobile):
     conn = get_db()
     c = conn.cursor()
@@ -238,7 +228,7 @@ def check_subscription_and_profile(mobile):
     
     return sub_status, st.session_state.business_name
 
-# 1. LOGIN SCREEN (जर युझर लॉगिन नसेल तरच दिसेल)
+# LOGIN SCREEN
 if not st.session_state.user_mobile:
     st.markdown("""
         <div class="main-header">
@@ -267,7 +257,10 @@ if not st.session_state.user_mobile:
                 if otp_in == st.session_state.generated_otp:
                     st.session_state.user_mobile = mobile
                     st.session_state.user_role = role_sel
-                    st.query_params["user"] = mobile  # Save Session in URL Bar
+                    try:
+                        st.query_params["user"] = mobile
+                    except Exception:
+                        pass
                     
                     conn = get_db()
                     c = conn.cursor()
@@ -284,7 +277,7 @@ if not st.session_state.user_mobile:
                     st.error("Invalid OTP entered.")
     st.stop()
 
-# 2. CHECK PROFILE & ONBOARDING
+# CHECK PROFILE & ONBOARDING
 sub_status, bus_name = check_subscription_and_profile(st.session_state.user_mobile)
 
 if not bus_name:
@@ -315,7 +308,7 @@ if not bus_name:
             st.error("Please enter your Business Name.")
     st.stop()
 
-# 3. SIDEBAR WITH LOGOUT BUTTON
+# SIDEBAR WITH LOGOUT BUTTON
 st.sidebar.markdown(f"""
     <div class="user-card">
         👤 <b>User:</b> {st.session_state.user_mobile}<br>
@@ -330,7 +323,10 @@ if st.sidebar.button("🚪 Logout Account"):
     st.session_state.user_mobile = None
     st.session_state.business_name = None
     st.session_state.otp_sent = False
-    st.query_params.clear()  # Clear Saved Session
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     st.rerun()
 
 if sub_status == "EXPIRED":
@@ -341,7 +337,7 @@ if sub_status == "EXPIRED":
     st.markdown("[👉 **Click Here to Send Proof on WhatsApp**](https://wa.me/918381085702?text=Hi,%20I%20have%20paid%20Rs.112.10%20for%20SD%20Tally%20Business.)")
     st.stop()
 
-# NAVIGATION MENU OPTIONS
+# NAVIGATION MENU
 if st.session_state.user_role == "Salesman / Staff":
     menu_options = [
         "🧾 Tax Invoice (Sales)",
@@ -379,7 +375,6 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# MODULE IMPLEMENTATIONS WITH USER-MOBILE FILTERING
 user_mob = st.session_state.user_mobile
 
 # 1. DASHBOARD

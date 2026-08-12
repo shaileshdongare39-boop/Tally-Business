@@ -11305,10 +11305,6 @@ elif menu == "💰 Customer Outstanding Summary":
             "Total Customer Outstanding",
             money(total_customer_outstanding)
     )
-
-        st.metric(
-            "Total Customer Outstanding",
-            money(total_customer_outstanding)
 # ============================================================
 # SUPPLIER OUTSTANDING
 # ============================================================

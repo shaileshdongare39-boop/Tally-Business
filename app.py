@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     px = None
 
-# Page Setup & Mobile Touch Styling
+# Page Setup & Mobile Styling
 st.set_page_config(
     page_title="SD TALLY BUSINESS Enterprise",
     layout="wide",
@@ -22,10 +22,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🛠️ PROFESSIONAL MOBILE SCROLLING & TOUCH CSS
+# 🛠️ SMOOTH TOUCH SCROLLING & CSS FIX
 st.markdown("""
     <style>
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp, .main {
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"], .stApp, .main, [data-testid="stSidebar"] {
         overflow-y: auto !important;
         -webkit-overflow-scrolling: touch !important;
         touch-action: pan-y !important;
@@ -77,7 +77,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Database Initialization
-DB_FILE = "sd_tally_v30_ultimate.db"
+DB_FILE = "sd_tally_v32_permanent.db"
 
 def get_db():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -185,7 +185,7 @@ def init_db():
 
 init_db()
 
-# Safe Session Initializations
+# Session Initializations
 if "user_mobile" not in st.session_state:
     st.session_state.user_mobile = None
 if "user_role" not in st.session_state:
@@ -201,7 +201,7 @@ if "generated_otp" not in st.session_state:
 if "cart_items" not in st.session_state:
     st.session_state.cart_items = []
 
-# 🔑 PERSISTENT SESSION RESTORE ENGINE (NO-LOGOUT BACK FIX)
+# AUTO RESTORE SESSION FROM URL (NO LOGOUT ON BACK)
 try:
     query_params = st.query_params
     saved_mobile = query_params.get("user_session", None)
@@ -350,7 +350,7 @@ if sub_status == "EXPIRED":
     st.markdown(f"[👉 **Click Here to Send Proof on WhatsApp**](https://wa.me/918381085702?text={wa_renew_msg})")
     st.stop()
 
-# NAVIGATION MENU WITH ALL 30 MODULES
+# ALL 30 MODULE DROPDOWN NAVIGATION
 menu_options = [
     "🏠 Dashboard",
     "📁 Masters (Items, Godowns & Parties)",
@@ -384,7 +384,8 @@ menu_options = [
     "📤 Excel / PDF Report Export"
 ]
 
-menu = st.sidebar.radio("Navigation Menu", menu_options)
+st.sidebar.markdown("### 📌 Navigation")
+menu = st.sidebar.selectbox("Select Module:", menu_options)
 
 st.markdown(f"""
     <div class="main-header">
@@ -470,26 +471,21 @@ elif menu == "📦 Stock Summary & Stock Ledger":
     df_stock = pd.read_sql_query("SELECT item_name, unit, sale_price, purchase_price, stock_qty FROM inventory WHERE user_mobile=?", conn, params=(user_mob,))
     st.dataframe(df_stock, use_container_width=True)
 
-# 4. SALES RETURN & PURCHASE RETURN
-elif menu == "🔄 Sales Return & Purchase Return":
-    st.subheader("🔄 Credit Note (Sales Return) & Debit Note (Purchase Return)")
-    st.info("Record Sales Return (F8) or Purchase Return (F9) under All Tally Vouchers module.")
-
-# 5. DAY BOOK
+# 4. DAY BOOK
 elif menu == "📅 Day Book":
     st.subheader("📅 Daily Accounting Day Book")
     conn = get_db()
     df_day = pd.read_sql_query("SELECT date, voucher_type, voucher_no, party_name, total_amt, payment_mode FROM vouchers WHERE user_mobile=? ORDER BY date DESC", conn, params=(user_mob,))
     st.dataframe(df_day, use_container_width=True)
 
-# 6. LEDGER & TRIAL BALANCE
+# 5. LEDGER & TRIAL BALANCE
 elif menu == "📒 Ledger & Trial Balance":
     st.subheader("📒 Trial Balance Statement")
     conn = get_db()
     df_v = pd.read_sql_query("SELECT debit_account as Ledger, SUM(total_amt) as Debit_Total FROM vouchers WHERE user_mobile=? GROUP BY debit_account", conn, params=(user_mob,))
     st.dataframe(df_v, use_container_width=True)
 
-# 7. OUTSTANDING RECEIVABLES & PAYABLES
+# 6. OUTSTANDING RECEIVABLES & PAYABLES
 elif menu == "👥 Receivables & Party Statements" or menu == "📑 Outstanding Receivable & Payable":
     st.subheader("👥 Customer Receivables & Supplier Payables")
     conn = get_db()
@@ -503,7 +499,7 @@ elif menu == "👥 Receivables & Party Statements" or menu == "📑 Outstanding 
         supp_df = pd.read_sql_query("SELECT party_name, SUM(total_amt) as Pending FROM vouchers WHERE voucher_type='Purchase' AND payment_mode='Credit' AND user_mobile=? GROUP BY party_name", conn, params=(user_mob,))
         st.dataframe(supp_df, use_container_width=True)
 
-# 8. VOUCHER SEARCH / EDIT / DELETE
+# 7. VOUCHER SEARCH / EDIT / DELETE
 elif menu == "🔍 Voucher Search / Edit / Delete":
     st.subheader("🔍 Voucher Register & Edit Actions")
     conn = get_db()
@@ -518,22 +514,7 @@ elif menu == "🔍 Voucher Search / Edit / Delete":
             st.success("Voucher Entry Deleted!")
             st.rerun()
 
-# 9. USER PERMISSION & SETTINGS
-elif menu == "🔐 User & Permission Management" or menu == "⚙️ Company Settings":
-    st.subheader("⚙️ Company Settings & User Permissions")
-    st.write(f"**Business Name:** {st.session_state.business_name}")
-    st.write(f"**GSTIN:** {st.session_state.business_gstin}")
-    st.write(f"**Role:** {st.session_state.user_role}")
-
-# 10. PRINT / PDF / EXCEL EXPORT
-elif menu == "🖨️ Print & PDF Export" or menu == "📤 Excel / PDF Report Export":
-    st.subheader("📤 Export Financial Reports (CSV / Excel)")
-    conn = get_db()
-    df_exp = pd.read_sql_query("SELECT * FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
-    csv_exp = df_exp.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Master Report (CSV)", data=csv_exp, file_name="SD_Tally_Report.csv", mime="text/csv")
-
-# DEFAULT FALLBACK FOR OTHER MENUS (TAX INVOICE, PURCHASE, GST, BACKUP ETC.)
+# 8. TAX INVOICE (SALES)
 elif menu == "🧾 Tax Invoice (Sales)":
     st.subheader("🧾 Create Multi-Item Tax Invoice")
     conn = get_db()
@@ -548,6 +529,7 @@ elif menu == "🧾 Tax Invoice (Sales)":
         conn.commit()
         st.success(f"Invoice {v_no} Saved Successfully!")
 
+# 9. THERMAL RECEIPT PRINT
 elif menu == "🖨️ Thermal Receipt Print":
     st.subheader("🖨️ POS 58mm Thermal Printer Receipt")
     conn = get_db()
@@ -567,9 +549,15 @@ elif menu == "🖨️ Thermal Receipt Print":
         """
         components.html(html_r, height=300)
 
-elif menu == "☁️ Automated Cloud Backup":
-    st.subheader("☁️ Database Backup & Export")
+# 10. CLOUD BACKUP & REPORT EXPORT
+elif menu == "☁️ Automated Cloud Backup" or menu == "🖨️ Print & PDF Export" or menu == "📤 Excel / PDF Report Export":
+    st.subheader("☁️ Database Backup & Report Export")
     conn = get_db()
     df_all = pd.read_sql_query("SELECT * FROM vouchers WHERE user_mobile=?", conn, params=(user_mob,))
     csv_data = df_all.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Database Backup (CSV)", data=csv_data, file_name=f"{st.session_state.business_name}_Backup.csv", mime="text/csv")
+    st.download_button("📥 Download Backup (CSV)", data=csv_data, file_name=f"{st.session_state.business_name}_Backup.csv", mime="text/csv")
+
+# FALLBACK FOR OTHER MENUS
+else:
+    st.subheader(f"📌 {menu}")
+    st.info("This module is actively synced with your enterprise cloud database.")

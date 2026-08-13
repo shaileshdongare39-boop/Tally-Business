@@ -45,10 +45,12 @@ st.set_page_config(
 
 
 # ================================================================
-# CONSTANTS
+# CONSTANTS & DATABASE PATH FIX FOR STREAMLIT CLOUD
 # ================================================================
 
-DB_FILE = "sd_tally_business.db"
+# Streamlit Cloud वर पाथची अडचण येऊ नये म्हणून absolute path जोडला आहे
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "sd_tally_business.db")
 
 ROLES = ["Owner", "Staff"]
 
@@ -330,6 +332,7 @@ def init_db():
     conn.close()
 
 
+# डेटाबेस सुरुवातीलाच इनिशिअलाइझ करा
 init_db()
 
 
@@ -699,6 +702,8 @@ def register_user(
     if not business_name.strip():
         return False, "Business name is required."
 
+    init_db()  # टेबल तयार असल्याची खात्री
+
     conn = db()
 
     try:
@@ -753,6 +758,8 @@ def register_user(
 
 
 def login_user(username, password):
+    init_db()  # टेबल नसल्यास क्रॅश होऊ नये म्हणून टेबल तयार करा
+
     conn = db()
 
     row = conn.execute("""
@@ -2184,7 +2191,7 @@ def save_voucher(
     conn.commit()
     conn.close()
 
-    # Ledger (DOUBLED ENTRY LOGIC FIXED)
+    # Ledger Entry
     if voucher_type == "Sales":
         debit_account = party_name if payment_mode == "Credit" else payment_mode
         add_ledger(

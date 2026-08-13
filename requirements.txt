@@ -1,3 +1,9 @@
 streamlit
 pandas
 plotly
+reportlab
+openpyxl
+extra-streamlit-components
+pillow
+streamlit-qrcode-scanner
+xlsxwriter

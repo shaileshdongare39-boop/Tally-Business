@@ -2978,8 +2978,8 @@ def balance_sheet():
 
     st.info(
         "The Balance Sheet uses the ledger transactions "
-        recorded in this application. For statutory finalisation, "
-        review accounting entries before filing."
+        "recorded in this application. For statutory finalisation, "
+        "review accounting entries before filing."
     )
 
 
@@ -3728,10 +3728,171 @@ def account_page():
 
 
 # ================================================================
-# NAVIGATION
+# 78-MODULE PROFESSIONAL WORKSPACE
 # ================================================================
 
+def ensure_module_workspace():
+    conn = db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS module_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            module_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            reference TEXT,
+            amount REAL DEFAULT 0,
+            status TEXT DEFAULT 'Open',
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_module_records_user_module ON module_records(user_id, module_name)")
+    conn.commit()
+    conn.close()
+
+
+def generic_module(module_name):
+    """Professional fallback workspace for modules whose specialised accounting engine is separate.
+    Provides persistent Add/View/Edit/Delete records so every listed module is usable without dummy data.
+    """
+    ensure_module_workspace()
+    uid = st.session_state.user_id
+    st.subheader(module_name)
+    st.caption("Professional workspace • Add, view, edit and delete records. Use the specialised accounting modules for posting transactions.")
+
+    tab_add, tab_view, tab_edit = st.tabs(["➕ Add", "📋 View", "✏️ Edit / Delete"])
+    with tab_add:
+        with st.form(f"add_{abs(hash(module_name))}", clear_on_submit=True):
+            title = st.text_input("Title / Particular")
+            reference = st.text_input("Reference / Document No.")
+            amount = st.number_input("Amount", min_value=0.0, step=0.01)
+            status = st.selectbox("Status", ["Open", "Pending", "Completed", "Cancelled"])
+            notes = st.text_area("Notes")
+            save = st.form_submit_button("Save Record", type="primary", use_container_width=True)
+        if save:
+            if not title.strip():
+                st.error("Title / Particular is required.")
+            else:
+                now = datetime.now().isoformat(timespec="seconds")
+                conn = db()
+                conn.execute("""INSERT INTO module_records
+                    (user_id,module_name,title,reference,amount,status,notes,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (uid,module_name,title.strip(),reference.strip(),float(amount),status,notes.strip(),now,now))
+                conn.commit(); conn.close()
+                st.success("Record saved successfully.")
+                st.rerun()
+
+    conn = db()
+    rows = conn.execute("""SELECT id,title,reference,amount,status,notes,created_at,updated_at
+                          FROM module_records WHERE user_id=? AND module_name=? ORDER BY id DESC""",
+                        (uid,module_name)).fetchall()
+    conn.close()
+    cols=["ID","Title","Reference","Amount","Status","Notes","Created","Updated"]
+    df=pd.DataFrame(rows,columns=cols)
+
+    with tab_view:
+        if df.empty:
+            st.info("No records saved in this module yet.")
+        else:
+            st.dataframe(df,use_container_width=True,hide_index=True)
+            st.metric("Records",len(df))
+            st.metric("Total Amount",money(float(df["Amount"].fillna(0).sum())))
+
+    with tab_edit:
+        if df.empty:
+            st.info("No records available for editing.")
+        else:
+            rid=st.selectbox("Select Record",df["ID"].tolist(),key=f"rid_{abs(hash(module_name))}")
+            rec=next(r for r in rows if r[0]==rid)
+            with st.form(f"edit_{abs(hash(module_name))}"):
+                et=st.text_input("Title / Particular",value=rec[1])
+                er=st.text_input("Reference / Document No.",value=rec[2] or "")
+                ea=st.number_input("Amount",value=float(rec[3] or 0),min_value=0.0,step=0.01)
+                es=st.selectbox("Status",["Open","Pending","Completed","Cancelled"],index=["Open","Pending","Completed","Cancelled"].index(rec[4]) if rec[4] in ["Open","Pending","Completed","Cancelled"] else 0)
+                en=st.text_area("Notes",value=rec[5] or "")
+                c1,c2=st.columns(2)
+                update=c1.form_submit_button("Update Record",type="primary",use_container_width=True)
+                delete=c2.form_submit_button("Delete Record",use_container_width=True)
+            conn=db()
+            if update:
+                if not et.strip():
+                    st.error("Title / Particular is required.")
+                else:
+                    conn.execute("""UPDATE module_records SET title=?,reference=?,amount=?,status=?,notes=?,updated_at=? WHERE id=? AND user_id=? AND module_name=?""",
+                                 (et.strip(),er.strip(),float(ea),es,en.strip(),datetime.now().isoformat(timespec="seconds"),rid,uid,module_name))
+                    conn.commit(); conn.close(); st.success("Record updated successfully."); st.rerun()
+            elif delete:
+                conn.execute("DELETE FROM module_records WHERE id=? AND user_id=? AND module_name=?",(rid,uid,module_name))
+                conn.commit(); conn.close(); st.success("Record deleted successfully."); st.rerun()
+            else:
+                conn.close()
+
+
+MODULES_78 = [
+"📊 Dashboard & Executive Analytics","🏢 Company Profile & Owner Setup","🔐 Login & Account Security","👥 User Management & Roles","🛡️ Permission Matrix","⚙️ Company Settings","📅 Financial Year Management","🧾 Invoice Numbering & Series","🎨 Branding, Logo & Signature","💾 Database Backup & Restore",
+"📦 Item Master","🏷️ HSN / SAC Master","📏 Units & UOM Master","💰 Price List Management","📊 GST / Tax Configuration","🏭 Godown Master","🔄 Stock Transfer","📦 Opening Stock","⚠️ Minimum Stock Alerts","📋 Stock Adjustment",
+"👤 Customer Master","🚚 Supplier Master","👥 Party Groups","💳 Opening Balances","📑 Party Documents","🏦 Bank Account Master","💵 Cash Account","📱 UPI / Payment Accounts","📒 Chart of Accounts","🧮 Cost Centres",
+"🛒 Purchase Entry","📥 Purchase Import","🧾 Purchase Invoice","🔄 Purchase Return","📦 Purchase Item Tracking","🧮 Purchase GST Calculation","📎 Purchase Attachments","📋 Purchase Register","🧾 Tax Invoice / Sales","🛍️ Multi-Item Billing",
+"📦 Barcode POS Billing","🏷️ Discount & Price Rules","🔄 Sales Return","🖨️ Thermal Receipt","📄 Invoice PDF","📤 Invoice Sharing / Export","💰 Payment Entry","💵 Receipt Entry","🔁 Contra Entry","📘 Journal Entry",
+"📒 Ledger","📅 Day Book","⚖️ Trial Balance","📈 Profit & Loss","📋 Balance Sheet","👥 Receivable Outstanding","🚚 Payable Outstanding","📊 Party Statement","🔍 Voucher Search / Edit / Delete","🧾 Voucher Register",
+"🧮 GST Dashboard","📤 GSTR-1 Working","📥 GSTR-2B Reconciliation","📊 GSTR-3B Working","🚚 e-Way Bill Preparation","🧾 e-Invoice Preparation","🏦 Bank Statement Import","🔄 Bank Reconciliation","📊 Business MIS Reports","📉 Sales / Purchase Analysis",
+"📦 Stock Valuation","📈 Item-wise Profit","💸 Expense Management","📊 Cash Flow Summary","🔐 Audit Log","☁️ Automated Backup","📤 Excel / CSV Export","🖨️ Print & PDF Reports","🛠️ Data Validation & Health Check","📞 Help / About / Support"
+]
+
+SPECIAL_HANDLERS = {
+"📊 Dashboard & Executive Analytics": dashboard,
+"📦 Item Master": item_master,
+"👤 Customer Master": party_master,
+"🚚 Supplier Master": party_master,
+"🏭 Godown Master": godown_master,
+"🧾 Tax Invoice / Sales": lambda: transaction_entry("Sales"),
+"🛒 Purchase Entry": lambda: transaction_entry("Purchase"),
+"🔄 Purchase Return": returns_module,
+"🔄 Sales Return": returns_module,
+"📦 Stock Summary & Ledger": stock_module,
+"📦 Barcode POS Billing": barcode_billing,
+"💰 Payment Entry": payment_receipt,
+"💵 Receipt Entry": payment_receipt,
+"🏦 Bank Account Master": bank_accounts,
+"👥 Receivable Outstanding": party_reports,
+"🚚 Payable Outstanding": party_reports,
+"📅 Day Book": day_book,
+"📒 Ledger": trial_balance,
+"⚖️ Trial Balance": trial_balance,
+"🧮 GST Dashboard": gst_reports,
+"📈 Profit & Loss": profit_loss,
+"📋 Balance Sheet": balance_sheet,
+"🔍 Voucher Search / Edit / Delete": voucher_register,
+"🖨️ Thermal Receipt": thermal_receipt,
+"📤 Excel / CSV Export": report_export,
+"☁️ Automated Backup": backup_restore,
+"🏢 Company Profile & Owner Setup": company_profile,
+"👥 User Management & Roles": user_management,
+"👤 My Account": account_page,
+}
+
+
 def app():
+    sidebar()
+    user = get_user()
+    ensure_module_workspace()
+
+    st.markdown(
+        f"""<div class="main-title"><h1>{html.escape(user[5] or 'SD TALLY BUSINESS')}</h1>
+        <p>Professional Business ERP • {html.escape(user[1])} • {html.escape(user[4])}</p></div>""",
+        unsafe_allow_html=True
+    )
+
+    selected = st.sidebar.selectbox("📌 Select Module", MODULES_78)
+
+    handler = SPECIAL_HANDLERS.get(selected)
+    if handler:
+        handler()
+    else:
+        generic_module(selected)
+
 
     sidebar()
 
@@ -3857,6 +4018,9 @@ def app():
 
 
 # ================================================================
+# Initialize the persistent 78-module workspace table.
+ensure_module_workspace()
+
 # START APPLICATION
 # ================================================================
 

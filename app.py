@@ -361,20 +361,23 @@ if "editing_item" not in st.session_state:
 
 
 # ================================================================
-# COOKIE MANAGER (AUTO-LOGIN)
+# COOKIE MANAGER (FIXED DUPLICATE KEY ISSUE)
 # ================================================================
 
 def get_cookie_manager():
     if COOKIES_OK:
-        return stx.CookieManager()
+        if "cookie_manager" not in st.session_state:
+            st.session_state.cookie_manager = stx.CookieManager(key="sd_tally_cookie_mgr")
+        return st.session_state.cookie_manager
     return None
 
 def check_auto_login():
     cm = get_cookie_manager()
     if cm:
-        saved_user_id = cm.get(cookie="sd_tally_user_id")
-        if saved_user_id and st.session_state.user_id is None:
-            try:
+        try:
+            saved_user_id = cm.get(cookie="sd_tally_user_id")
+            if saved_user_id and st.session_state.user_id is None:
+                init_db()
                 conn = db()
                 user = conn.execute("SELECT id, username, role FROM users WHERE id=? AND active=1", (int(saved_user_id),)).fetchone()
                 conn.close()
@@ -383,8 +386,8 @@ def check_auto_login():
                     st.session_state.username = user["username"]
                     st.session_state.role = user["role"]
                     ensure_settings()
-            except Exception:
-                pass
+        except Exception:
+            pass
 
 
 # ================================================================
@@ -817,12 +820,16 @@ def login_user(username, password):
 
     cm = get_cookie_manager()
     if cm:
-        cm.set("sd_tally_user_id", str(row["id"]), key="set_user_cookie", expires_at=datetime.now() + timedelta(days=30))
+        try:
+            cm.set("sd_tally_user_id", str(row["id"]), key="set_user_cookie", expires_at=datetime.now() + timedelta(days=30))
+        except Exception:
+            pass
 
     return True
 
 
 def reset_password_with_mobile(mobile, new_password):
+    init_db()
     conn = db()
     row = conn.execute("SELECT id FROM users WHERE mobile=? AND active=1", (clean(mobile),)).fetchone()
     if row:
@@ -835,6 +842,7 @@ def reset_password_with_mobile(mobile, new_password):
 
 
 def get_username_by_mobile(mobile):
+    init_db()
     conn = db()
     row = conn.execute("SELECT username FROM users WHERE mobile=? AND active=1", (clean(mobile),)).fetchone()
     conn.close()
@@ -1015,7 +1023,10 @@ def sidebar():
     ):
         cm = get_cookie_manager()
         if cm:
-            cm.delete("sd_tally_user_id")
+            try:
+                cm.delete("sd_tally_user_id")
+            except Exception:
+                pass
         st.session_state.user_id = None
         st.session_state.username = None
         st.session_state.role = None

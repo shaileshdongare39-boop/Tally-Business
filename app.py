@@ -151,7 +151,9 @@ html, body, [data-testid="stAppViewContainer"] {
 # ================================================================
 
 def db():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def init_db():
@@ -450,10 +452,10 @@ def ensure_settings():
             VALUES (?, ?, ?, ?, ?, ?)
         """, (
             st.session_state.user_id,
-            u[5] or "",
-            u[6] or "",
-            u[7] or "",
-            u[3] or "",
+            u["business_name"] or "",
+            u["business_address"] or "",
+            u["gstin"] or "",
+            u["mobile"] or "",
             ""
         ))
         conn.commit()
@@ -486,8 +488,8 @@ def next_invoice_no():
             number + 1
         ))
     else:
-        prefix = row[0] or "INV"
-        number = row[1] or 1
+        prefix = row["invoice_prefix"] or "INV"
+        number = row["next_invoice"] or 1
 
         conn.execute("""
             UPDATE settings
@@ -573,7 +575,7 @@ def current_stock(item_id):
 
     conn.close()
 
-    return float(opening[0] if opening else 0) + float(total or 0)
+    return float(opening["opening_stock"] if opening else 0) + float(total or 0)
 
 
 def add_stock_transaction(
@@ -586,8 +588,6 @@ def add_stock_transaction(
 ):
     conn = db()
 
-    # Positive quantity = stock in
-    # Negative quantity = stock out
     conn.execute("""
         INSERT INTO stock_transactions
         (
@@ -768,12 +768,12 @@ def login_user(username, password):
     if not row:
         return False
 
-    if not verify_password(password, row[2]):
+    if not verify_password(password, row["password_hash"]):
         return False
 
-    st.session_state.user_id = row[0]
-    st.session_state.username = row[1]
-    st.session_state.role = row[3]
+    st.session_state.user_id = row["id"]
+    st.session_state.username = row["username"]
+    st.session_state.role = row["role"]
 
     ensure_settings()
 
@@ -898,13 +898,13 @@ def sidebar():
         f"""
         <div class="card">
         <b>👤 User</b><br>
-        {html.escape(user[2] or user[1])}<br><br>
+        {html.escape(user['name'] or user['username'])}<br><br>
 
         <b>🏢 Business</b><br>
-        {html.escape(user[5] or "-")}<br><br>
+        {html.escape(user['business_name'] or "-")}<br><br>
 
         <b>🔑 Role</b><br>
-        {html.escape(user[4])}
+        {html.escape(user['role'])}
         </div>
         """,
         unsafe_allow_html=True
@@ -1047,42 +1047,42 @@ def company_profile():
 
         name = st.text_input(
             "Company Name",
-            value=user[5] or ""
+            value=user['business_name'] or ""
         )
 
         address = st.text_area(
             "Business Address",
-            value=user[6] or ""
+            value=user['business_address'] or ""
         )
 
         gstin = st.text_input(
             "GSTIN",
-            value=user[7] or ""
+            value=user['gstin'] or ""
         )
 
         phone = st.text_input(
             "Mobile",
-            value=user[3] or ""
+            value=user['mobile'] or ""
         )
 
         email = st.text_input(
             "Email",
-            value=(settings[6] if settings else "")
+            value=(settings['email'] if settings else "")
         )
 
         prefix = st.text_input(
             "Invoice Prefix",
-            value=(settings[7] if settings else "INV")
+            value=(settings['invoice_prefix'] if settings else "INV")
         )
 
         upi = st.text_input(
             "UPI ID",
-            value=(settings[9] if settings else "")
+            value=(settings['upi_id'] if settings else "")
         )
 
         payment_note = st.text_area(
             "Payment / Renewal Note",
-            value=(settings[10] if settings else "")
+            value=(settings['payment_note'] if settings else "")
         )
 
         submitted = st.form_submit_button(
@@ -1740,9 +1740,9 @@ def transaction_entry(voucher_type):
         f"🧾 {voucher_type} Entry"
     )
 
-    if voucher_type == "Sales":
+    if voucher_type in ["Sales", "Sales Return"]:
         party_type = "Customer"
-    elif voucher_type == "Purchase":
+    elif voucher_type in ["Purchase", "Purchase Return"]:
         party_type = "Supplier"
     else:
         party_type = "Customer"
@@ -2184,17 +2184,16 @@ def save_voucher(
     conn.commit()
     conn.close()
 
-    # Ledger
+    # Ledger (DOUBLED ENTRY LOGIC FIXED)
     if voucher_type == "Sales":
-
+        debit_account = party_name if payment_mode == "Credit" else payment_mode
         add_ledger(
-            party_name,
-            total if payment_mode == "Credit" else 0,
+            debit_account,
+            total,
             0,
             voucher_id,
             f"Sales {voucher_no}"
         )
-
         add_ledger(
             "Sales",
             0,
@@ -2204,7 +2203,7 @@ def save_voucher(
         )
 
     elif voucher_type == "Purchase":
-
+        credit_account = party_name if payment_mode == "Credit" else payment_mode
         add_ledger(
             "Purchase",
             taxable,
@@ -2212,11 +2211,10 @@ def save_voucher(
             voucher_id,
             f"Purchase {voucher_no}"
         )
-
         add_ledger(
-            party_name,
-            0 if payment_mode != "Credit" else total,
-            total if payment_mode == "Credit" else 0,
+            credit_account,
+            0,
+            total,
             voucher_id,
             f"Purchase {voucher_no}"
         )
@@ -2489,7 +2487,7 @@ def delete_voucher(voucher_id):
 
     audit(
         "DELETE_VOUCHER",
-        f"{voucher[0]} {voucher[1]}"
+        f"{voucher['voucher_type']} {voucher['voucher_no']}"
     )
 
     st.success(
@@ -3375,6 +3373,8 @@ def user_management():
             type="primary"
         )
 
+    owner_user = get_user()
+
     if save:
 
         if len(password) < 6:
@@ -3408,9 +3408,9 @@ def user_management():
                     hash_password(password),
                     name,
                     mobile,
-                    get_user()[5],
-                    get_user()[6],
-                    get_user()[7],
+                    owner_user['business_name'],
+                    owner_user['business_address'],
+                    owner_user['gstin'],
                     now_text()
                 ))
 
@@ -3446,7 +3446,7 @@ def user_management():
         ORDER BY id
         """,
         conn,
-        params=(get_user()[5],)
+        params=(owner_user['business_name'],)
     )
 
     conn.close()
@@ -3520,7 +3520,7 @@ def thermal_receipt():
             border:1px dashed #222;
         ">
         <center>
-        <h3>{html.escape(user[5] or 'Business')}</h3>
+        <h3>{html.escape(user['business_name'] or 'Business')}</h3>
         <div>Tax Invoice</div>
         </center>
         <hr>
@@ -3553,7 +3553,7 @@ def barcode_billing():
         conn = db()
 
         row = conn.execute("""
-            SELECT *
+            SELECT id, name, sale_price, gst_rate
             FROM items
             WHERE user_id=?
             AND barcode=?
@@ -3568,7 +3568,7 @@ def barcode_billing():
         if row:
 
             st.success(
-                f"Item found: {row[2]}"
+                f"Item found: {row['name']}"
             )
 
             qty = st.number_input(
@@ -3579,9 +3579,9 @@ def barcode_billing():
 
             line = calculate_line(
                 qty,
-                float(row[9]),
+                float(row['sale_price']),
                 0,
-                float(row[7])
+                float(row['gst_rate'])
             )
 
             if st.button(
@@ -3589,13 +3589,13 @@ def barcode_billing():
             ):
 
                 st.session_state.cart.append({
-                    "item_id": row[0],
-                    "item_name": row[2],
+                    "item_id": row['id'],
+                    "item_name": row['name'],
                     "qty": qty,
-                    "rate": row[9],
+                    "rate": row['sale_price'],
                     "discount": 0,
                     "taxable": line["taxable"],
-                    "gst_rate": row[7],
+                    "gst_rate": row['gst_rate'],
                     "cgst": line["cgst"],
                     "sgst": line["sgst"],
                     "igst": 0,
@@ -3634,19 +3634,19 @@ def account_page():
     user = get_user()
 
     st.write(
-        f"**Username:** {user[1]}"
+        f"**Username:** {user['username']}"
     )
 
     st.write(
-        f"**Name:** {user[2]}"
+        f"**Name:** {user['name']}"
     )
 
     st.write(
-        f"**Mobile:** {user[3]}"
+        f"**Mobile:** {user['mobile']}"
     )
 
     st.write(
-        f"**Role:** {user[4]}"
+        f"**Role:** {user['role']}"
     )
 
     st.markdown("---")
@@ -3700,7 +3700,7 @@ def account_page():
 
         if not verify_password(
             old,
-            row[0]
+            row["password_hash"]
         ):
 
             st.error(
@@ -3740,11 +3740,11 @@ def app():
     st.markdown(
         f"""
         <div class="main-title">
-            <h1>{html.escape(user[5] or "SD TALLY BUSINESS")}</h1>
+            <h1>{html.escape(user['business_name'] or "SD TALLY BUSINESS")}</h1>
             <p>
                 Professional Business ERP |
-                {html.escape(user[1])} |
-                {html.escape(user[4])}
+                {html.escape(user['username'])} |
+                {html.escape(user['role'])}
             </p>
         </div>
         """,

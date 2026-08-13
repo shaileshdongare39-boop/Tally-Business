@@ -13,7 +13,7 @@ import csv
 import os
 import json
 import html
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 # Optional libraries
@@ -21,6 +21,12 @@ try:
     import plotly.express as px
 except Exception:
     px = None
+
+try:
+    import extra_streamlit_components as stx
+    COOKIES_OK = True
+except Exception:
+    COOKIES_OK = False
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -48,9 +54,8 @@ st.set_page_config(
 # CONSTANTS & DATABASE PATH FIX FOR STREAMLIT CLOUD
 # ================================================================
 
-# Streamlit Cloud वर पाथची अडचण येऊ नये म्हणून absolute path जोडला आहे
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "sd_tally_business.db")
+DB_FILE = os.path.join(BASE_DIR, "sd_tally_v2.db")
 
 ROLES = ["Owner", "Staff"]
 
@@ -332,7 +337,6 @@ def init_db():
     conn.close()
 
 
-# डेटाबेस सुरुवातीलाच इनिशिअलाइझ करा
 init_db()
 
 
@@ -354,6 +358,33 @@ if "cart" not in st.session_state:
 
 if "editing_item" not in st.session_state:
     st.session_state.editing_item = None
+
+
+# ================================================================
+# COOKIE MANAGER (AUTO-LOGIN)
+# ================================================================
+
+def get_cookie_manager():
+    if COOKIES_OK:
+        return stx.CookieManager()
+    return None
+
+def check_auto_login():
+    cm = get_cookie_manager()
+    if cm:
+        saved_user_id = cm.get(cookie="sd_tally_user_id")
+        if saved_user_id and st.session_state.user_id is None:
+            try:
+                conn = db()
+                user = conn.execute("SELECT id, username, role FROM users WHERE id=? AND active=1", (int(saved_user_id),)).fetchone()
+                conn.close()
+                if user:
+                    st.session_state.user_id = user["id"]
+                    st.session_state.username = user["username"]
+                    st.session_state.role = user["role"]
+                    ensure_settings()
+            except Exception:
+                pass
 
 
 # ================================================================
@@ -681,7 +712,7 @@ def calculate_line(qty, rate, discount, gst_rate):
 
 
 # ================================================================
-# AUTHENTICATION
+# AUTHENTICATION & PASSWORD RECOVERY
 # ================================================================
 
 def register_user(
@@ -702,7 +733,7 @@ def register_user(
     if not business_name.strip():
         return False, "Business name is required."
 
-    init_db()  # टेबल तयार असल्याची खात्री
+    init_db()
 
     conn = db()
 
@@ -758,7 +789,7 @@ def register_user(
 
 
 def login_user(username, password):
-    init_db()  # टेबल नसल्यास क्रॅश होऊ नये म्हणून टेबल तयार करा
+    init_db()
 
     conn = db()
 
@@ -784,7 +815,32 @@ def login_user(username, password):
 
     ensure_settings()
 
+    cm = get_cookie_manager()
+    if cm:
+        cm.set("sd_tally_user_id", str(row["id"]), key="set_user_cookie", expires_at=datetime.now() + timedelta(days=30))
+
     return True
+
+
+def reset_password_with_mobile(mobile, new_password):
+    conn = db()
+    row = conn.execute("SELECT id FROM users WHERE mobile=? AND active=1", (clean(mobile),)).fetchone()
+    if row:
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), row["id"]))
+        conn.commit()
+        conn.close()
+        return True, "पासवर्ड यशस्वीरीत्या बदलला आहे! आता नवीन पासवर्डने लॉगिन करा."
+    conn.close()
+    return False, "हा मोबाईल नंबर नोंदणीकृत नाही."
+
+
+def get_username_by_mobile(mobile):
+    conn = db()
+    row = conn.execute("SELECT username FROM users WHERE mobile=? AND active=1", (clean(mobile),)).fetchone()
+    conn.close()
+    if row:
+        return True, f"तुमचा युझरनेम आहे: **{row['username']}**"
+    return False, "हा मोबाईल नंबर नोंदणीकृत नाही."
 
 
 # ================================================================
@@ -800,9 +856,10 @@ def login_page():
     </div>
     """, unsafe_allow_html=True)
 
-    tab1, tab2 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "🔐 Login",
-        "📝 Create Business Account"
+        "📝 Create Business Account",
+        "🔑 Forgot Username / Password"
     ])
 
     with tab1:
@@ -892,6 +949,41 @@ def login_page():
                 else:
                     st.error(message)
 
+    with tab3:
+        st.subheader("🔑 Account Recovery")
+        option = st.radio("तुम्हाला काय करायचे आहे?", ["युझरनेम शोधा (Find Username)", "पासवर्ड रिसेट करा (Reset Password)"])
+
+        if option == "युझरनेम शोधा (Find Username)":
+            f_mobile = st.text_input("रजिस्टर मोबाईल नंबर टाका", key="find_user_mobile")
+            if st.button("युझरनेम मिळवा", type="primary"):
+                if f_mobile:
+                    ok, msg = get_username_by_mobile(f_mobile)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+                else:
+                    st.warning("कृपया मोबाईल नंबर टाका.")
+
+        elif option == "पासवर्ड रिसेट करा (Reset Password)":
+            r_mobile = st.text_input("रजिस्टर मोबाईल नंबर टाका", key="reset_pass_mobile")
+            new_pass = st.text_input("नवीन पासवर्ड तयार करा", type="password", key="reset_new_pass")
+            confirm_pass = st.text_input("नवीन पासवर्ड पुन्हा टाका", type="password", key="reset_confirm_pass")
+
+            if st.button("पासवर्ड अपडेट करा", type="primary"):
+                if not r_mobile:
+                    st.warning("कृपया मोबाईल नंबर टाका.")
+                elif len(new_pass) < 6:
+                    st.error("पासवर्ड किमान ६ अक्षरांचा असावा.")
+                elif new_pass != confirm_pass:
+                    st.error("पासवर्ड जुळत नाहीत.")
+                else:
+                    ok, msg = reset_password_with_mobile(r_mobile, new_pass)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
 
 # ================================================================
 # SIDEBAR
@@ -921,6 +1013,9 @@ def sidebar():
         "🚪 Logout",
         use_container_width=True
     ):
+        cm = get_cookie_manager()
+        if cm:
+            cm.delete("sd_tally_user_id")
         st.session_state.user_id = None
         st.session_state.username = None
         st.session_state.role = None
@@ -3866,6 +3961,8 @@ def app():
 # ================================================================
 # START APPLICATION
 # ================================================================
+
+check_auto_login()
 
 if st.session_state.user_id is None:
     login_page()
